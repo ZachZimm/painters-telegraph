@@ -1,18 +1,10 @@
-// Create a web server that listens on port 8080 and returns a string "Hello world"
-// when the endpoint "/" is hit.
-// Use the net/http package to create the server.
-// Use the ListenAndServe method to listen on port 8080.
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 )
-
-// Things I need for a game server
-// A map of ongoing games - even though I only intend to have one game at a time for now
-// A game struct that contains the game state
-// A player struct that contains the player state
 
 var games map[string]Game = make(map[string]Game)
 var players map[string]Player = make(map[string]Player)
@@ -28,6 +20,7 @@ type Game struct {
 	totalRounds  int
 	currentRound int
 	promptsSet   bool
+	gameStarted  bool
 	players      []Player
 	spectators   []Player
 	prompts      [][]string
@@ -43,13 +36,22 @@ func getPlayerIndex(playerName string, game Game) int {
 	return -1
 }
 
+func parseBodyObject(r *http.Request) map[string]string {
+	body := make([]byte, r.ContentLength)
+	r.Body.Read(body)
+	bodyObj := make(map[string]string)
+	json.Unmarshal(body, &bodyObj)
+	return bodyObj
+}
+
 // An endpoint to create a new game
 func createGame(w http.ResponseWriter, r *http.Request) {
 	// Create a new game
+	jsonObject := parseBodyObject(r)
 	var game Game = Game{
-		gameName:     "test",
+		gameName:     jsonObject["gameName"],
 		totalRounds:  5,
-		currentRound: 1,
+		currentRound: 0,
 		promptsSet:   false,
 		players:      []Player{},
 		prompts:      [][]string{},
@@ -71,30 +73,27 @@ func listGames(w http.ResponseWriter, r *http.Request) {
 
 func gameStateToJSON(game Game) string {
 	// Convert the game state to JSON
-	// gameJSON, err := json.Marshal(game)
-	// if err != nil {
-	// 	fmt.Println(err)
-	// }
 	gameJsonString := ""
 	gameJsonString += "{"
 	gameJsonString += "\"gameName\": \"" + game.gameName + "\","
 	gameJsonString += "\"totalRounds\": " + fmt.Sprint(game.totalRounds) + ","
 	gameJsonString += "\"currentRound\": " + fmt.Sprint(game.currentRound) + ","
 	gameJsonString += "\"promptsSet\": " + fmt.Sprint(game.promptsSet) + ","
+	gameJsonString += "\"gameStarted\": " + fmt.Sprint(game.gameStarted) + ","
 	gameJsonString += "\"players\": ["
 	for i, player := range game.players {
 		gameJsonString += "{"
-		gameJsonString += "\"playerName\": \"" + player.playerName + "\","
-		gameJsonString += "\"playerSecret\": \"" + player.playerSecret + "\""
+		gameJsonString += "\"playerName\": \"" + player.playerName + "\""
 		gameJsonString += "}"
 		if i < len(game.players)-1 {
 			gameJsonString += ","
 		}
 	}
+	gameJsonString += "],"
+	gameJsonString += "\"spectators\": ["
 	for i, spectator := range game.spectators {
 		gameJsonString += "{"
-		gameJsonString += "\"playerName\": \"" + spectator.playerName + "\","
-		gameJsonString += "\"playerSecret\": \"" + spectator.playerSecret + "\""
+		gameJsonString += "\"playerName\": \"" + spectator.playerName + "\""
 		gameJsonString += "}"
 		if i < len(game.spectators)-1 {
 			gameJsonString += ","
@@ -110,6 +109,7 @@ func gameStateToJSON(game Game) string {
 				gameJsonString += ","
 			}
 		}
+		gameJsonString += "]"
 	}
 	gameJsonString += "],"
 	gameJsonString += "\"drawings\": ["
@@ -121,6 +121,7 @@ func gameStateToJSON(game Game) string {
 				gameJsonString += ","
 			}
 		}
+		gameJsonString += "]"
 	}
 	gameJsonString += "]"
 	gameJsonString += "}"
@@ -128,16 +129,45 @@ func gameStateToJSON(game Game) string {
 }
 
 func getGameState(w http.ResponseWriter, r *http.Request) {
-	// Example URL: http://localhost:9119/getGameState?gameName=test
-	gameName := r.URL.Query().Get("gameName")
-	game := games[gameName]
+	jsonObject := parseBodyObject(r)
+	game, ok := games[jsonObject["gameName"]]
+	if !ok {
+		fmt.Fprintf(w, "Game not found")
+		return
+	}
 	gameStateJSON := gameStateToJSON(game)
 	fmt.Fprintf(w, gameStateJSON)
 }
 
+func startGame(w http.ResponseWriter, r *http.Request) {
+	jsonObject := parseBodyObject(r)
+	gameName := jsonObject["gameName"]
+	game, ok := games[gameName]
+	if !ok {
+		fmt.Fprintf(w, "Game not found")
+		return
+	}
+
+	if game.gameStarted == false {
+		game.gameStarted = true
+		game.prompts = make([][]string, len(game.players))
+		game.drawings = make([][]string, len(game.players))
+		for i := range game.prompts {
+			game.prompts[i] = make([]string, game.totalRounds)
+			game.drawings[i] = make([]string, game.totalRounds)
+		}
+
+		games[gameName] = game
+		fmt.Fprintf(w, "Game started")
+	} else {
+		fmt.Fprintf(w, "Game already started")
+	}
+}
+
 func endGame(w http.ResponseWriter, r *http.Request) {
 	// TODO Implement logic for ending a game and creating GIFs, as well as a final game state that can be reviewed
-	gameName := r.URL.Query().Get("gameName")
+	jsonObject := parseBodyObject(r)
+	gameName := jsonObject["gameName"]
 	fmt.Fprintf(w, "Game ended")
 	// Remove the game from the games map
 	delete(games, gameName)
@@ -145,8 +175,14 @@ func endGame(w http.ResponseWriter, r *http.Request) {
 
 func endRound(w http.ResponseWriter, r *http.Request) {
 	// End a round
-	gameName := r.URL.Query().Get("gameName")
-	game := games[gameName]
+	jsonObject := parseBodyObject(r)
+	gameName := jsonObject["gameName"]
+	game, ok := games[gameName]
+	if !ok {
+		fmt.Fprintf(w, "Game not found")
+		return
+	}
+
 	if game.promptsSet == false {
 		if game.currentRound == game.totalRounds {
 			endGame(w, r)
@@ -160,6 +196,8 @@ func endRound(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	games[gameName] = game
+
 	// Implement logic for either serving prompts or drawings to players
 	// This will be done using the round number as an offset to the player index
 	// First round player 1 creates prompt 1, player 2 gets prompt 1, player 3 gets prompt 2, etc.
@@ -169,29 +207,28 @@ func endRound(w http.ResponseWriter, r *http.Request) {
 }
 
 func authenticatePlayer(givenPlayerName, givenPlayerSecret string) bool {
-	// Authenticate a player
-	// retrunString := "{"
+	if givenPlayerName == "" {
+		return false
+	}
 	existingPlayer, playerExists := players[givenPlayerName]
 	if playerExists {
 		if existingPlayer.playerSecret == givenPlayerSecret {
 			return true
-			// retrunString += "\"authenticated\": true}"
 
 		} else {
 			return false
-			// retrunString += "\"authenticated\": false}"
 		}
 	} else {
 		players[givenPlayerName] = Player{playerName: givenPlayerName, playerSecret: givenPlayerSecret}
 		return true
-		// retrunString += "\"authenticated\": false}"
 	}
 }
 
 func checkAuthentication(w http.ResponseWriter, r *http.Request) {
 	// Check if a player is authenticated
-	playerName := r.URL.Query().Get("playerName")
-	playerSecret := r.URL.Query().Get("playerSecret")
+	jsonObject := parseBodyObject(r)
+	playerName := jsonObject["playerName"]
+	playerSecret := jsonObject["playerSecret"]
 	returnString := "{"
 	if authenticatePlayer(playerName, playerSecret) {
 		returnString += "\"authenticated\": true}"
@@ -202,21 +239,28 @@ func checkAuthentication(w http.ResponseWriter, r *http.Request) {
 }
 
 func joinGame(w http.ResponseWriter, r *http.Request) {
-	// Join a game
-	gameName := r.URL.Query().Get("gameName")
-	playerName := r.URL.Query().Get("playerName")
-	playerSecret := r.URL.Query().Get("playerSecret")
+	// Accept a POST request to join a game
+	bodyObj := parseBodyObject(r)
+
+	gameName := bodyObj["gameName"]
+	playerName := bodyObj["playerName"]
+	playerSecret := bodyObj["playerSecret"]
 
 	if authenticatePlayer(playerName, playerSecret) {
-		game := games[gameName]
+		game, ok := games[gameName]
+		if !ok {
+			fmt.Fprintf(w, "Game not found")
+			return
+		}
 		player := players[playerName]
-		// game.players = append(game.players, player)
-		if game.currentRound == 0 {
+		if game.gameStarted == false {
 			game.players = append(game.players, player)
+			games[gameName] = game // I don't like this approach
+			fmt.Fprintf(w, "Player joined game %s", gameName)
 		} else {
 			game.spectators = append(game.spectators, player)
+			fmt.Fprintf(w, "Player joined game as spectator")
 		}
-		fmt.Fprintf(w, "Player joined game")
 	} else {
 		fmt.Fprintf(w, "Player not authenticated")
 		return
@@ -225,20 +269,93 @@ func joinGame(w http.ResponseWriter, r *http.Request) {
 
 func submitPrompt(w http.ResponseWriter, r *http.Request) {
 	// Submit a prompt to the current game
-	gameName := r.URL.Query().Get("gameName")
-	playerName := r.URL.Query().Get("playerName")
-	playerSecret := r.URL.Query().Get("playerSecret")
-	prompt := r.URL.Query().Get("prompt")
+	bodyObj := parseBodyObject(r)
+
+	gameName := bodyObj["gameName"]
+	playerName := bodyObj["playerName"]
+	playerSecret := bodyObj["playerSecret"]
+	prompt := bodyObj["prompt"]
 
 	if authenticatePlayer(playerName, playerSecret) {
-		game := games[gameName]
+		game, ok := games[gameName]
+		if !ok {
+			fmt.Fprintf(w, "Game not found")
+			return
+		}
+
+		if game.gameStarted == false {
+			fmt.Fprintf(w, "Game not started")
+			return
+		}
+		if game.promptsSet == true {
+			fmt.Fprintf(w, "Prompts already set for this round")
+			return
+		}
 		playerIndex := getPlayerIndex(playerName, game)
+		if playerIndex == -1 {
+			fmt.Fprintf(w, "Player not in game")
+			return
+		}
+
 		gameRotationIndex := (playerIndex + game.currentRound) % len(game.players)
+		if len(game.prompts) == 0 || len(game.prompts[gameRotationIndex]) == 0 {
+			fmt.Fprintf(w, "Game prompts slice not initialized")
+			return
+		}
 		if game.prompts[gameRotationIndex][game.currentRound] == "" {
 			game.prompts[gameRotationIndex][game.currentRound] = prompt
 			fmt.Fprintf(w, "Prompt submitted")
+			games[gameName] = game
 		} else {
 			fmt.Fprintf(w, "Prompt already submitted")
+		}
+	} else {
+		fmt.Fprintf(w, "Player not authenticated")
+		return
+	}
+}
+
+func submitDrawing(w http.ResponseWriter, r *http.Request) {
+	// Submit a prompt to the current game
+	bodyObj := parseBodyObject(r)
+
+	gameName := bodyObj["gameName"]
+	playerName := bodyObj["playerName"]
+	playerSecret := bodyObj["playerSecret"]
+	drawing := bodyObj["drawing"]
+
+	if authenticatePlayer(playerName, playerSecret) {
+		game, ok := games[gameName]
+		if !ok {
+			fmt.Fprintf(w, "Game not found")
+			return
+		}
+
+		if game.gameStarted == false {
+			fmt.Fprintf(w, "Game not started")
+			return
+		}
+		if game.promptsSet == false {
+			fmt.Fprintf(w, "Prompts not yet set for this round")
+			return
+		}
+		playerIndex := getPlayerIndex(playerName, game)
+		if playerIndex == -1 {
+			fmt.Fprintf(w, "Player not in game")
+			return
+		}
+
+		gameRotationIndex := (playerIndex + game.currentRound) % len(game.players)
+		if len(game.drawings) == 0 || len(game.drawings[gameRotationIndex]) == 0 {
+			fmt.Fprintf(w, "Game drawings slice not initialized")
+			return
+		}
+		if game.drawings[gameRotationIndex][game.currentRound] == "" {
+			game.drawings[gameRotationIndex][game.currentRound] = drawing
+			fmt.Fprintf(w, "Drawing submitted")
+			games[gameName] = game
+		} else {
+			fmt.Fprintf(w, "Drawing already submitted")
 		}
 	} else {
 		fmt.Fprintf(w, "Player not authenticated")
@@ -256,7 +373,7 @@ func submitPrompt(w http.ResponseWriter, r *http.Request) {
 // An endpoint for an authenticated player to submit a drawing
 // -An endpoint for an authenticated player to submit a caption
 //
-// Functions for qeueing content to display to players when requested
+// Functions for queueing content to display to players when requested
 // Functions for when the game starts
 // Routine for automatically progressing the game based on a configurable timer
 // Functions for passing prompts around
@@ -266,18 +383,15 @@ func submitPrompt(w http.ResponseWriter, r *http.Request) {
 // Function for creating GIFs from images and captions
 
 func main() {
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, "Hello world")
-	})
-
 	http.HandleFunc("/createGame", createGame)
 	http.HandleFunc("/listGames", listGames)
 	http.HandleFunc("/getGameState", getGameState)
+	http.HandleFunc("/startGame", startGame)
 	http.HandleFunc("/endGame", endGame)
 	http.HandleFunc("/endRound", endRound)
 	http.HandleFunc("/checkAuthentication", checkAuthentication)
 	http.HandleFunc("/joinGame", joinGame)
 	http.HandleFunc("/submitPrompt", submitPrompt)
-
+	http.HandleFunc("/submitDrawing", submitDrawing)
 	http.ListenAndServe(":9119", nil)
 }
