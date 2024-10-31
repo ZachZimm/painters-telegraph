@@ -15,10 +15,10 @@ import (
 // A player struct that contains the player state
 
 var games map[string]Game = make(map[string]Game)
+var players map[string]Player = make(map[string]Player)
 
 type Player struct {
 	playerName   string
-	playerID     int // might not need this
 	playerSecret string
 }
 
@@ -29,8 +29,18 @@ type Game struct {
 	currentRound int
 	promptsSet   bool
 	players      []Player
+	spectators   []Player
 	prompts      [][]string
 	drawings     [][]string
+}
+
+func getPlayerIndex(playerName string, game Game) int {
+	for i, player := range game.players {
+		if player.playerName == playerName {
+			return i
+		}
+	}
+	return -1
 }
 
 // An endpoint to create a new game
@@ -75,10 +85,18 @@ func gameStateToJSON(game Game) string {
 	for i, player := range game.players {
 		gameJsonString += "{"
 		gameJsonString += "\"playerName\": \"" + player.playerName + "\","
-		gameJsonString += "\"playerID\": " + fmt.Sprint(player.playerID) + ","
 		gameJsonString += "\"playerSecret\": \"" + player.playerSecret + "\""
 		gameJsonString += "}"
 		if i < len(game.players)-1 {
+			gameJsonString += ","
+		}
+	}
+	for i, spectator := range game.spectators {
+		gameJsonString += "{"
+		gameJsonString += "\"playerName\": \"" + spectator.playerName + "\","
+		gameJsonString += "\"playerSecret\": \"" + spectator.playerSecret + "\""
+		gameJsonString += "}"
+		if i < len(game.spectators)-1 {
 			gameJsonString += ","
 		}
 	}
@@ -150,17 +168,97 @@ func endRound(w http.ResponseWriter, r *http.Request) {
 	// Remove the game from the games map if the game is over
 }
 
-// An endpoint to end a game
-// An endpoint to end a round
-// An endpoint to get a game's current game state
-// - An endpoint to get all game names
-// An endpoint to authenticate a player
-// An endpoint for an authenticated player to join a game
-// An endpoint for an authenticated player to submit an intial prompt
+func authenticatePlayer(givenPlayerName, givenPlayerSecret string) bool {
+	// Authenticate a player
+	// retrunString := "{"
+	existingPlayer, playerExists := players[givenPlayerName]
+	if playerExists {
+		if existingPlayer.playerSecret == givenPlayerSecret {
+			return true
+			// retrunString += "\"authenticated\": true}"
+
+		} else {
+			return false
+			// retrunString += "\"authenticated\": false}"
+		}
+	} else {
+		players[givenPlayerName] = Player{playerName: givenPlayerName, playerSecret: givenPlayerSecret}
+		return true
+		// retrunString += "\"authenticated\": false}"
+	}
+}
+
+func checkAuthentication(w http.ResponseWriter, r *http.Request) {
+	// Check if a player is authenticated
+	playerName := r.URL.Query().Get("playerName")
+	playerSecret := r.URL.Query().Get("playerSecret")
+	returnString := "{"
+	if authenticatePlayer(playerName, playerSecret) {
+		returnString += "\"authenticated\": true}"
+	} else {
+		returnString += "\"authenticated\": false}"
+	}
+	fmt.Fprintf(w, returnString)
+}
+
+func joinGame(w http.ResponseWriter, r *http.Request) {
+	// Join a game
+	gameName := r.URL.Query().Get("gameName")
+	playerName := r.URL.Query().Get("playerName")
+	playerSecret := r.URL.Query().Get("playerSecret")
+
+	if authenticatePlayer(playerName, playerSecret) {
+		game := games[gameName]
+		player := players[playerName]
+		// game.players = append(game.players, player)
+		if game.currentRound == 0 {
+			game.players = append(game.players, player)
+		} else {
+			game.spectators = append(game.spectators, player)
+		}
+		fmt.Fprintf(w, "Player joined game")
+	} else {
+		fmt.Fprintf(w, "Player not authenticated")
+		return
+	}
+}
+
+func submitPrompt(w http.ResponseWriter, r *http.Request) {
+	// Submit a prompt to the current game
+	gameName := r.URL.Query().Get("gameName")
+	playerName := r.URL.Query().Get("playerName")
+	playerSecret := r.URL.Query().Get("playerSecret")
+	prompt := r.URL.Query().Get("prompt")
+
+	if authenticatePlayer(playerName, playerSecret) {
+		game := games[gameName]
+		playerIndex := getPlayerIndex(playerName, game)
+		gameRotationIndex := (playerIndex + game.currentRound) % len(game.players)
+		if game.prompts[gameRotationIndex][game.currentRound] == "" {
+			game.prompts[gameRotationIndex][game.currentRound] = prompt
+			fmt.Fprintf(w, "Prompt submitted")
+		} else {
+			fmt.Fprintf(w, "Prompt already submitted")
+		}
+	} else {
+		fmt.Fprintf(w, "Player not authenticated")
+		return
+	}
+}
+
+// -An endpoint to end a game
+// -An endpoint to end a round
+// -An endpoint to get a game's current game state
+// -An endpoint to get all game names
+// -An endpoint to authenticate a player
+// -An endpoint for an authenticated player to join a game
+// -An endpoint for an authenticated player to submit an intial prompt
 // An endpoint for an authenticated player to submit a drawing
-// An endpoint for an authenticated player to submit a caption
+// -An endpoint for an authenticated player to submit a caption
 //
+// Functions for qeueing content to display to players when requested
 // Functions for when the game starts
+// Routine for automatically progressing the game based on a configurable timer
 // Functions for passing prompts around
 // Functions for passing drawings around
 // Functions for when the game ends
@@ -177,6 +275,9 @@ func main() {
 	http.HandleFunc("/getGameState", getGameState)
 	http.HandleFunc("/endGame", endGame)
 	http.HandleFunc("/endRound", endRound)
+	http.HandleFunc("/checkAuthentication", checkAuthentication)
+	http.HandleFunc("/joinGame", joinGame)
+	http.HandleFunc("/submitPrompt", submitPrompt)
 
 	http.ListenAndServe(":9119", nil)
 }
