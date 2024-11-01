@@ -6,8 +6,8 @@ import (
 	"net/http"
 )
 
-var games map[string]Game = make(map[string]Game)
-var players map[string]Player = make(map[string]Player)
+var games map[string]*Game = make(map[string]*Game)
+var players map[string]*Player = make(map[string]*Player)
 
 type Player struct {
 	playerName   string
@@ -27,7 +27,7 @@ type Game struct {
 	drawings     [][]string
 }
 
-func getPlayerIndex(playerName string, game Game) int {
+func getPlayerIndex(playerName string, game *Game) int {
 	for i, player := range game.players {
 		if player.playerName == playerName {
 			return i
@@ -48,7 +48,7 @@ func parseBodyObject(r *http.Request) map[string]string {
 func createGame(w http.ResponseWriter, r *http.Request) {
 	// Create a new game
 	jsonObject := parseBodyObject(r)
-	var game Game = Game{
+	game := &Game{
 		gameName:     jsonObject["gameName"],
 		totalRounds:  5,
 		currentRound: 0,
@@ -135,7 +135,7 @@ func getGameState(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "Game not found")
 		return
 	}
-	gameStateJSON := gameStateToJSON(game)
+	gameStateJSON := gameStateToJSON(*game)
 	fmt.Fprintf(w, gameStateJSON)
 }
 
@@ -157,7 +157,6 @@ func startGame(w http.ResponseWriter, r *http.Request) {
 			game.drawings[i] = make([]string, game.totalRounds)
 		}
 
-		games[gameName] = game
 		fmt.Fprintf(w, "Game started")
 	} else {
 		fmt.Fprintf(w, "Game already started")
@@ -219,7 +218,7 @@ func authenticatePlayer(givenPlayerName, givenPlayerSecret string) bool {
 			return false
 		}
 	} else {
-		players[givenPlayerName] = Player{playerName: givenPlayerName, playerSecret: givenPlayerSecret}
+		players[givenPlayerName] = &Player{playerName: givenPlayerName, playerSecret: givenPlayerSecret}
 		return true
 	}
 }
@@ -254,11 +253,11 @@ func joinGame(w http.ResponseWriter, r *http.Request) {
 		}
 		player := players[playerName]
 		if game.gameStarted == false {
-			game.players = append(game.players, player)
+			game.players = append(game.players, *player)
 			games[gameName] = game // I don't like this approach
 			fmt.Fprintf(w, "Player joined game %s", gameName)
 		} else {
-			game.spectators = append(game.spectators, player)
+			game.spectators = append(game.spectators, *player)
 			fmt.Fprintf(w, "Player joined game as spectator")
 		}
 	} else {
@@ -305,7 +304,6 @@ func submitPrompt(w http.ResponseWriter, r *http.Request) {
 		if game.prompts[gameRotationIndex][game.currentRound] == "" {
 			game.prompts[gameRotationIndex][game.currentRound] = prompt
 			fmt.Fprintf(w, "Prompt submitted")
-			games[gameName] = game
 		} else {
 			fmt.Fprintf(w, "Prompt already submitted")
 		}
@@ -353,7 +351,6 @@ func submitDrawing(w http.ResponseWriter, r *http.Request) {
 		if game.drawings[gameRotationIndex][game.currentRound] == "" {
 			game.drawings[gameRotationIndex][game.currentRound] = drawing
 			fmt.Fprintf(w, "Drawing submitted")
-			games[gameName] = game
 		} else {
 			fmt.Fprintf(w, "Drawing already submitted")
 		}
@@ -370,7 +367,7 @@ func submitDrawing(w http.ResponseWriter, r *http.Request) {
 // -An endpoint to authenticate a player
 // -An endpoint for an authenticated player to join a game
 // -An endpoint for an authenticated player to submit an intial prompt
-// An endpoint for an authenticated player to submit a drawing
+// -An endpoint for an authenticated player to submit a drawing
 // -An endpoint for an authenticated player to submit a caption
 //
 // Functions for queueing content to display to players when requested
