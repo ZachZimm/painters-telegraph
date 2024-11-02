@@ -15,10 +15,19 @@ import (
 
 var games map[string]*Game = make(map[string]*Game)
 var players map[string]*Player = make(map[string]*Player)
+var (
+	newPlayerMessage     = "You have not yet joined a game"
+	joinedGameMessage    = "You have joined the game"
+	gameStartedMessage   = "Write an interesting prompt!"
+	drawPromptMessage    = "Draw the prompt!"
+	captionPromptMessage = "Write a caption for the drawing!"
+	gameEndedMessage     = "The game has ended, check the results!"
+)
 
 type Player struct {
-	playerName   string
-	playerSecret string
+	playerName    string
+	playerSecret  string
+	queuedMessage string
 }
 
 // Game struct
@@ -49,6 +58,24 @@ func parseBodyObject(r *http.Request) map[string]string {
 	bodyObj := make(map[string]string)
 	json.Unmarshal(body, &bodyObj)
 	return bodyObj
+}
+
+func getPlayerQueuedMessage(w http.ResponseWriter, r *http.Request) {
+	jsonObject := parseBodyObject(r)
+	playerName := jsonObject["playerName"]
+	gameName := jsonObject["gameName"]
+	game, ok := games[gameName]
+	if !ok {
+		fmt.Fprintf(w, "Game not found")
+		return
+	}
+	playerIndex := getPlayerIndex(playerName, game)
+	if playerIndex == -1 {
+		fmt.Fprintf(w, "Player not found")
+		return
+	}
+	player := game.players[playerIndex]
+	fmt.Fprintf(w, player.queuedMessage)
 }
 
 // An endpoint to create a new game
@@ -164,6 +191,12 @@ func startGame(w http.ResponseWriter, r *http.Request) {
 			game.drawings[i] = make([]string, game.totalRounds)
 		}
 
+		for i, p := range game.players {
+			p.queuedMessage = gameStartedMessage
+			game.players[i] = p
+			players[p.playerName].queuedMessage = gameStartedMessage
+		}
+
 		fmt.Fprintf(w, "Game started")
 	} else {
 		fmt.Fprintf(w, "Game already started")
@@ -172,6 +205,13 @@ func startGame(w http.ResponseWriter, r *http.Request) {
 
 func _endGame(gameName string) {
 	// TODO Implement logic for ending a game and creating GIFs, as well as a final game state that can be reviewed
+	// Set the queued messages for the players to view the final game state
+	game := games[gameName]
+	for i, p := range game.players {
+		p.queuedMessage = "Game ended"
+		game.players[i] = p
+		players[p.playerName].queuedMessage = "Game ended"
+	}
 	delete(games, gameName)
 }
 
@@ -192,11 +232,25 @@ func _endRound(gameName string) bool {
 		if game.currentRound == game.totalRounds {
 			_endGame(gameName)
 		} else {
+			// set queued messages for players to draw
+			for i, p := range game.players {
+				p.queuedMessage = "Draw " + game.prompts[i][game.currentRound]
+				game.players[i] = p
+				players[p.playerName].queuedMessage = "Draw " + game.prompts[i][game.currentRound]
+			}
+
 			game.promptsSet = true
 			return true
 		}
 	} else {
 		if game.currentRound != game.totalRounds {
+			// set queued messages for players to caption the drawings
+			for i, p := range game.players {
+				p.queuedMessage = "Caption the drawing"
+				game.players[i] = p
+				players[p.playerName].queuedMessage = "Caption the drawing! image: " + game.drawings[i][game.currentRound]
+			}
+
 			game.currentRound++
 			game.promptsSet = false
 			return true
@@ -231,7 +285,7 @@ func authenticatePlayer(givenPlayerName, givenPlayerSecret string) bool {
 			return false
 		}
 	} else {
-		players[givenPlayerName] = &Player{playerName: givenPlayerName, playerSecret: givenPlayerSecret}
+		players[givenPlayerName] = &Player{playerName: givenPlayerName, playerSecret: givenPlayerSecret, queuedMessage: newPlayerMessage}
 		return true
 	}
 }
@@ -266,8 +320,8 @@ func joinGame(w http.ResponseWriter, r *http.Request) {
 		}
 		player := players[playerName]
 		if game.gameStarted == false {
+			player.queuedMessage = newPlayerMessage + ": " + gameName
 			game.players = append(game.players, *player)
-			games[gameName] = game // I don't like this approach
 			fmt.Fprintf(w, "Player joined game %s", gameName)
 		} else {
 			game.spectators = append(game.spectators, *player)
@@ -504,7 +558,9 @@ func uploadDrawing(w http.ResponseWriter, r *http.Request) {
 // Functions for passing prompts around
 // Functions for passing drawings around
 // Functions for when the game ends
-// Function for resizing uploaded images
+// 		Create a GIF from each prompt drawing chain
+// 		Game state should be transfered to a new map of completed games, accessible by a different endpoint
+// -Function for resizing uploaded images
 // Function for creating GIFs from images and captions
 
 func main() {
