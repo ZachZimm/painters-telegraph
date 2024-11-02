@@ -37,8 +37,8 @@ type Game struct {
 	currentRound int
 	promptsSet   bool
 	gameStarted  bool
-	players      []Player
-	spectators   []Player
+	players      []*Player
+	spectators   []*Player
 	prompts      [][]string
 	drawings     [][]string
 }
@@ -63,18 +63,7 @@ func parseBodyObject(r *http.Request) map[string]string {
 func getPlayerQueuedMessage(w http.ResponseWriter, r *http.Request) {
 	jsonObject := parseBodyObject(r)
 	playerName := jsonObject["playerName"]
-	gameName := jsonObject["gameName"]
-	game, ok := games[gameName]
-	if !ok {
-		fmt.Fprintf(w, "Game not found")
-		return
-	}
-	playerIndex := getPlayerIndex(playerName, game)
-	if playerIndex == -1 {
-		fmt.Fprintf(w, "Player not found")
-		return
-	}
-	player := game.players[playerIndex]
+	player := players[playerName]
 	fmt.Fprintf(w, player.queuedMessage)
 }
 
@@ -87,7 +76,8 @@ func createGame(w http.ResponseWriter, r *http.Request) {
 		totalRounds:  5,
 		currentRound: 0,
 		promptsSet:   false,
-		players:      []Player{},
+		players:      []*Player{},
+		spectators:   []*Player{},
 		prompts:      [][]string{},
 		drawings:     [][]string{},
 	}
@@ -191,10 +181,8 @@ func startGame(w http.ResponseWriter, r *http.Request) {
 			game.drawings[i] = make([]string, game.totalRounds)
 		}
 
-		for i, p := range game.players {
+		for _, p := range game.players {
 			p.queuedMessage = gameStartedMessage
-			game.players[i] = p
-			players[p.playerName].queuedMessage = gameStartedMessage
 		}
 
 		fmt.Fprintf(w, "Game started")
@@ -207,10 +195,8 @@ func _endGame(gameName string) {
 	// TODO Implement logic for ending a game and creating GIFs, as well as a final game state that can be reviewed
 	// Set the queued messages for the players to view the final game state
 	game := games[gameName]
-	for i, p := range game.players {
+	for _, p := range game.players {
 		p.queuedMessage = "Game ended"
-		game.players[i] = p
-		players[p.playerName].queuedMessage = "Game ended"
 	}
 	delete(games, gameName)
 }
@@ -235,8 +221,6 @@ func _endRound(gameName string) bool {
 			// set queued messages for players to draw
 			for i, p := range game.players {
 				p.queuedMessage = "Draw " + game.prompts[i][game.currentRound]
-				game.players[i] = p
-				players[p.playerName].queuedMessage = "Draw " + game.prompts[i][game.currentRound]
 			}
 
 			game.promptsSet = true
@@ -246,9 +230,7 @@ func _endRound(gameName string) bool {
 		if game.currentRound != game.totalRounds {
 			// set queued messages for players to caption the drawings
 			for i, p := range game.players {
-				p.queuedMessage = "Caption the drawing"
-				game.players[i] = p
-				players[p.playerName].queuedMessage = "Caption the drawing! image: " + game.drawings[i][game.currentRound]
+				p.queuedMessage = "Caption the drawing! image: " + game.drawings[i][game.currentRound]
 			}
 
 			game.currentRound++
@@ -321,10 +303,10 @@ func joinGame(w http.ResponseWriter, r *http.Request) {
 		player := players[playerName]
 		if game.gameStarted == false {
 			player.queuedMessage = newPlayerMessage + ": " + gameName
-			game.players = append(game.players, *player)
+			game.players = append(game.players, player)
 			fmt.Fprintf(w, "Player joined game %s", gameName)
 		} else {
-			game.spectators = append(game.spectators, *player)
+			game.spectators = append(game.spectators, player)
 			fmt.Fprintf(w, "Player joined game as spectator")
 		}
 	} else {
