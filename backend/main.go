@@ -85,14 +85,20 @@ func createGame(w http.ResponseWriter, r *http.Request) {
 	// Add the game to the games map
 	games[game.gameName] = game
 
-	fmt.Fprintf(w, "Game created")
+	fmt.Fprintf(w, "{\"status\": \"OK\", \"message\": \"Game "+game.gameName+" created\"}")
 }
 
 func listGames(w http.ResponseWriter, r *http.Request) {
 	// Loop through the games map and return the game names
-	for key, _ := range games {
-		fmt.Fprintf(w, key)
+	responseStr := "{\"status\":\"OK\", \"games\": ["
+	for key := range games {
+		responseStr += "\"" + key + "\","
 	}
+	if len(games) > 0 {
+		responseStr = responseStr[:len(responseStr)-1]
+	}
+	responseStr += "]}"
+	fmt.Fprintf(w, responseStr)
 }
 
 func gameStateToJSON(game Game) string {
@@ -127,7 +133,7 @@ func gameStateToJSON(game Game) string {
 	gameJsonString += "\"prompts\": ["
 	for i, prompt := range game.prompts {
 		gameJsonString += "["
-		for j, _ := range prompt {
+		for j := range prompt {
 			gameJsonString += "\"" + game.prompts[i][j] + "\""
 			if j < len(prompt)-1 {
 				gameJsonString += ","
@@ -139,7 +145,7 @@ func gameStateToJSON(game Game) string {
 	gameJsonString += "\"drawings\": ["
 	for i, drawing := range game.drawings {
 		gameJsonString += "["
-		for j, _ := range drawing {
+		for j := range drawing {
 			gameJsonString += "\"" + game.drawings[i][j] + "\""
 			if j < len(drawing)-1 {
 				gameJsonString += ","
@@ -156,7 +162,8 @@ func getGameState(w http.ResponseWriter, r *http.Request) {
 	jsonObject := parseBodyObject(r)
 	game, ok := games[jsonObject["gameName"]]
 	if !ok {
-		fmt.Fprintf(w, "Game not found")
+		responseStr := "{\"status\": \"ERROR\", \"message\": \"Game not found\"}"
+		fmt.Fprintf(w, responseStr)
 		return
 	}
 	gameStateJSON := gameStateToJSON(*game)
@@ -168,7 +175,8 @@ func startGame(w http.ResponseWriter, r *http.Request) {
 	gameName := jsonObject["gameName"]
 	game, ok := games[gameName]
 	if !ok {
-		fmt.Fprintf(w, "Game not found")
+		responseStr := "{\"status\": \"ERROR\", \"message\": \"Game not found\"}"
+		fmt.Fprintf(w, responseStr)
 		return
 	}
 
@@ -185,9 +193,11 @@ func startGame(w http.ResponseWriter, r *http.Request) {
 			p.queuedMessage = gameStartedMessage
 		}
 
-		fmt.Fprintf(w, "Game started")
+		responseStr := "{\"status\": \"OK\", \"message\": \"Game started\"}"
+		fmt.Fprintf(w, responseStr)
 	} else {
-		fmt.Fprintf(w, "Game already started")
+		responseStr := "{\"status\": \"ERROR\", \"message\": \"Game already started\"}"
+		fmt.Fprintf(w, responseStr)
 	}
 }
 
@@ -204,7 +214,8 @@ func _endGame(gameName string) {
 func endGame(w http.ResponseWriter, r *http.Request) {
 	jsonObject := parseBodyObject(r)
 	gameName := jsonObject["gameName"]
-	fmt.Fprintf(w, "Game ended")
+	responseStr := "{\"status\": \"OK\", \"message\": \"Game ended\"}"
+	fmt.Fprintf(w, responseStr)
 	_endGame(gameName)
 }
 
@@ -249,7 +260,9 @@ func endRound(w http.ResponseWriter, r *http.Request) {
 	// Implement logic for either serving prompts or drawings to players
 	// This will be done using the round number as an offset to the player index
 	// First round player 1 creates prompt 1, player 2 gets prompt 1, player 3 gets prompt 2, etc.
-	fmt.Fprintf(w, "Round ended")
+	// fmt.Fprintf(w, "Round ended")
+	responseStr := "{\"status\": \"OK\", \"message\": \"Round ended\"}"
+	fmt.Fprintf(w, responseStr)
 
 	// Remove the game from the games map if the game is over
 }
@@ -277,7 +290,8 @@ func checkAuthentication(w http.ResponseWriter, r *http.Request) {
 	jsonObject := parseBodyObject(r)
 	playerName := jsonObject["playerName"]
 	playerSecret := jsonObject["playerSecret"]
-	returnString := "{"
+	// returnString := "{"
+	returnString := "{\"status\": \"OK\", "
 	if authenticatePlayer(playerName, playerSecret) {
 		returnString += "\"authenticated\": true}"
 	} else {
@@ -304,13 +318,17 @@ func joinGame(w http.ResponseWriter, r *http.Request) {
 		if game.gameStarted == false {
 			player.queuedMessage = joinedGameMessage
 			game.players = append(game.players, player)
-			fmt.Fprintf(w, "Player joined game %s", gameName)
+			responseStr := "{\"status\": \"OK\", \"message\": \"Player joined game\"}"
+			fmt.Fprintf(w, responseStr)
 		} else {
 			game.spectators = append(game.spectators, player)
-			fmt.Fprintf(w, "Player joined game as spectator")
+			// fmt.Fprintf(w, "Player joined game as spectator")
+			responseStr := "{\"status\": \"OK\", \"message\": \"Player joined game as spectator\"}"
+			fmt.Fprintf(w, responseStr)
 		}
 	} else {
-		fmt.Fprintf(w, "Player not authenticated")
+		responseStr := "{\"status\": \"ERROR\", \"message\": \"Player not authenticated\"}"
+		fmt.Fprintf(w, responseStr)
 		return
 	}
 }
@@ -327,37 +345,46 @@ func submitPrompt(w http.ResponseWriter, r *http.Request) {
 	if authenticatePlayer(playerName, playerSecret) {
 		game, ok := games[gameName]
 		if !ok {
-			fmt.Fprintf(w, "Game not found")
+			responseStr := "{\"status\": \"ERROR\", \"message\": \"Game not found\"}"
+			fmt.Fprintf(w, responseStr)
 			return
 		}
 
 		if game.gameStarted == false {
-			fmt.Fprintf(w, "Game not started")
+			responseStr := "{\"status\": \"ERROR\", \"message\": \"Game not started\"}"
+			fmt.Fprintf(w, responseStr)
 			return
 		}
 		if game.promptsSet == true {
-			fmt.Fprintf(w, "Prompts already set for this round")
+			responseStr := "{\"status\": \"ERROR\", \"message\": \"Prompts already set for this round\"}"
+			fmt.Fprintf(w, responseStr)
 			return
 		}
 		playerIndex := getPlayerIndex(playerName, game)
 		if playerIndex == -1 {
-			fmt.Fprintf(w, "Player not in game")
+			responseStr := "{\"status\": \"ERROR\", \"message\": \"Player not in game\"}"
+			fmt.Fprintf(w, responseStr)
 			return
 		}
 
 		gameRotationIndex := (playerIndex + game.currentRound) % len(game.players)
 		if len(game.prompts) == 0 || len(game.prompts[gameRotationIndex]) == 0 {
-			fmt.Fprintf(w, "Game prompts slice not initialized")
+			responseStr := "{\"status\": \"ERROR\", \"message\": \"Game prompts slice not initialized\"}"
+			fmt.Fprintf(w, responseStr)
 			return
 		}
 		if game.prompts[gameRotationIndex][game.currentRound] == "" {
 			game.prompts[gameRotationIndex][game.currentRound] = prompt
-			fmt.Fprintf(w, "Prompt submitted")
+			responseStr := "{\"status\": \"OK\", \"message\": \"Prompt submitted\"}"
+			fmt.Fprintf(w, responseStr)
 		} else {
-			fmt.Fprintf(w, "Prompt already submitted")
+			responseStr := "{\"status\": \"ERROR\", \"message\": \"Prompt already submitted\"}"
+			fmt.Fprintf(w, responseStr)
 		}
 	} else {
-		fmt.Fprintf(w, "Player not authenticated")
+		responseStr := "{\"status\": \"ERROR\", \"message\": \"Player not authenticated\"}"
+		fmt.Fprintf(w, responseStr)
+
 		return
 	}
 }
@@ -374,37 +401,45 @@ func submitDrawing(w http.ResponseWriter, r *http.Request) {
 	if authenticatePlayer(playerName, playerSecret) {
 		game, ok := games[gameName]
 		if !ok {
-			fmt.Fprintf(w, "Game not found")
+			responseStr := "{\"status\": \"ERROR\", \"message\": \"Game not found\"}"
+			fmt.Fprintf(w, responseStr)
 			return
 		}
 
 		if game.gameStarted == false {
-			fmt.Fprintf(w, "Game not started")
+			responseStr := "{\"status\": \"ERROR\", \"message\": \"Game not started\"}"
+			fmt.Fprintf(w, responseStr)
 			return
 		}
 		if game.promptsSet == false {
-			fmt.Fprintf(w, "Prompts not yet set for this round")
+			responseStr := "{\"status\": \"ERROR\", \"message\": \"Prompts not yet set for this round\"}"
+			fmt.Fprintf(w, responseStr)
 			return
 		}
 		playerIndex := getPlayerIndex(playerName, game)
 		if playerIndex == -1 {
-			fmt.Fprintf(w, "Player not in game")
+			responseStr := "{\"status\": \"ERROR\", \"message\": \"Player not in game\"}"
+			fmt.Fprintf(w, responseStr)
 			return
 		}
 
 		gameRotationIndex := (playerIndex + game.currentRound) % len(game.players)
 		if len(game.drawings) == 0 || len(game.drawings[gameRotationIndex]) == 0 {
-			fmt.Fprintf(w, "Game drawings slice not initialized")
+			responseStr := "{\"status\": \"ERROR\", \"message\": \"Game drawings slice not initialized\"}"
+			fmt.Fprintf(w, responseStr)
 			return
 		}
 		if game.drawings[gameRotationIndex][game.currentRound] == "" {
 			game.drawings[gameRotationIndex][game.currentRound] = drawing
-			fmt.Fprintf(w, "Drawing submitted")
+			responseStr := "{\"status\": \"OK\", \"message\": \"Drawing submitted\"}"
+			fmt.Fprintf(w, responseStr)
 		} else {
-			fmt.Fprintf(w, "Drawing already submitted")
+			responseStr := "{\"status\": \"ERROR\", \"message\": \"Drawing already submitted\"}"
+			fmt.Fprintf(w, responseStr)
 		}
 	} else {
-		fmt.Fprintf(w, "Player not authenticated")
+		responseStr := "{\"status\": \"ERROR\", \"message\": \"Player not authenticated\"}"
+		fmt.Fprintf(w, responseStr)
 		return
 	}
 }
@@ -519,7 +554,8 @@ func uploadDrawing(w http.ResponseWriter, r *http.Request) {
 	// Return the relative URL of the saved image
 	baseUrl := getBaseURL(r)
 	imageUrl := fmt.Sprintf("%s/%s", baseUrl, outputPath)
-	fmt.Fprintf(w, imageUrl)
+	responseStr := "{\"status\": \"OK\", \"message\": \"Image uploaded\", \"imageUrl\": \"" + imageUrl + "\"}"
+	fmt.Fprintf(w, responseStr)
 }
 
 // -An endpoint to end a game
