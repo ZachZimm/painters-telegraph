@@ -255,10 +255,13 @@ func startGame(w http.ResponseWriter, r *http.Request) {
 }
 
 func _endGame(gameName string) {
-	// TODO Implement logic for ending a game and creating GIFs, as well as a final game state that can be reviewed
-	// Set the queued messages for the players to view the final game state
+	// TODO move the game results to a new EndedGame struct and add it to the endedGames map (slice?)
+	//   EndedGame struct is different in that it has the slice of gifs, drawing urls, and captions
+	// 	 But no players, spectators, timers, etc.
 	game := games[gameName]
-	createGifsFromGame(game)
+	gifs := createGifsFromGame(game)
+	_ = gifs
+
 	for _, p := range game.players {
 		p.queuedMessage = gameEndedMessage + "\"gameResults\": " + "\"TODO\"}"
 	}
@@ -1004,7 +1007,6 @@ func main() {
 	fs := http.FileServer(http.Dir("images"))
 	http.Handle("/images/", http.StripPrefix("/images/", fs))
 	// example: http://localhost:9119/images/12345678.png
-	getNonSubmissionImagePath("caption")
-	getNonSubmissionImagePath("drawing")
+	http.Handle("/gifs/", http.StripPrefix("/gifs/", fs))
 	http.ListenAndServe(":9119", nil)
 }
