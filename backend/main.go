@@ -63,7 +63,12 @@ func parseBodyObject(r *http.Request) map[string]string {
 func getPlayerQueuedMessage(w http.ResponseWriter, r *http.Request) {
 	jsonObject := parseBodyObject(r)
 	playerName := jsonObject["playerName"]
-	player := players[playerName]
+	player, err := players[playerName]
+	if !err {
+		responseStr := "{\"status\": \"ERROR\", \"message\": \"Player not found\"}"
+		fmt.Fprintf(w, responseStr)
+		return
+	}
 	fmt.Fprintf(w, player.queuedMessage)
 }
 
@@ -594,6 +599,7 @@ func main() {
 	http.HandleFunc("/submitPrompt", submitPrompt)
 	http.HandleFunc("/submitDrawing", submitDrawing)
 	http.HandleFunc("/uploadDrawing", uploadDrawing)
+	http.HandleFunc("/getPlayerMessage", getPlayerQueuedMessage)
 
 	fs := http.FileServer(http.Dir("images"))
 	http.Handle("/images/", http.StripPrefix("/images/", fs))
