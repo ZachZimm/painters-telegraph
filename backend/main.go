@@ -6,28 +6,37 @@ import (
 	"encoding/json"
 	"fmt"
 	"image"
+	"image/color"
 	"image/color/palette"
 	"image/gif"
 	"image/png"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/golang/freetype"
 	"github.com/golang/freetype/truetype"
 	"golang.org/x/image/draw"
+	"golang.org/x/image/font"
 )
 
 var games map[string]*Game = make(map[string]*Game)
 var players map[string]*Player = make(map[string]*Player)
 var (
-	newPlayerMessage     = "{\"message\":\"You have not yet joined a game\"}"
-	joinedGameMessage    = "{\"message\":\"You have joined the game\"}"
-	gameStartedMessage   = "{\"message\":\"Write an interesting prompt!\"}"
-	drawPromptMessage    = "{\"message\":\"Draw the prompt!\""
-	captionPromptMessage = "{\"message\":\"Write a caption for the drawing!\""
-	gameEndedMessage     = "{\"message\":\"The game has ended, check the results!\""
+	newPlayerMessage               = "{\"message\":\"You have not yet joined a game\"}"
+	joinedGameMessage              = "{\"message\":\"You have joined the game\"}"
+	gameStartedMessage             = "{\"message\":\"Write an interesting prompt!\"}"
+	drawPromptMessage              = "{\"message\":\"Draw the prompt!\""
+	captionPromptMessage           = "{\"message\":\"Write a caption for the drawing!\""
+	gameEndedMessage               = "{\"message\":\"The game has ended, check the results!\""
+	nonSubmissionString_drawing    = "Uh oh. Looks like someone forgot to submit their drawing =/"
+	nonSubmissionString_caption    = "Uh oh. Looks like someone forgot to submit their caption =/"
+	fontName                       = "Roboto-Regular.ttf"
+	imagesDir                      = "images"
+	nonSubmissionImageName_drawing = "non_submission_drawing.png"
+	nonSubmissionImageName_caption = "non_submission_caption.png"
 )
 
 type Player struct {
@@ -39,6 +48,7 @@ type Player struct {
 // Game struct
 type Game struct {
 	gameName     string
+	roundTimer   int
 	totalRounds  int
 	currentRound int
 	promptsSet   bool
@@ -82,9 +92,40 @@ func getPlayerQueuedMessage(w http.ResponseWriter, r *http.Request) {
 func createGame(w http.ResponseWriter, r *http.Request) {
 	// Create a new game
 	jsonObject := parseBodyObject(r)
+	// parse the JSON object for the fields, and use default values if they are not provided
+	_gameName := jsonObject["gameName"]
+	if _gameName == "" {
+		fmt.Fprintf(w, "{\"status\": \"ERROR\", \"message\": \"gameName is required\"}")
+		return
+	}
+	// Check if the game already exists
+	// If the game already exists, return an error
+	if _, ok := games[_gameName]; ok {
+		fmt.Fprintf(w, "{\"status\": \"ERROR\", \"message\": \"Game "+jsonObject["gameName"]+" already exists\"}")
+		return
+	}
+	if jsonObject["totalRounds"] == "" {
+		jsonObject["totalRounds"] = "3"
+	}
+	// try to parse an int from the totalRounds field
+	_totalRounds, err := strconv.Atoi(jsonObject["totalRounds"])
+	if err != nil {
+		fmt.Fprintf(w, "{\"status\": \"ERROR\", \"message\": \"totalRounds must be an integer\"}")
+		return
+	}
+	if jsonObject["roundTimer"] == "" {
+		jsonObject["roundTimer"] = "60"
+	}
+	_roundTimer, err := strconv.Atoi(jsonObject["roundTimer"])
+	if err != nil {
+		fmt.Fprintf(w, "{\"status\": \"ERROR\", \"message\": \"roundTimer must be an integer\"}")
+		return
+	}
+
 	game := &Game{
-		gameName:     jsonObject["gameName"],
-		totalRounds:  5,
+		gameName:     _gameName,
+		roundTimer:   _roundTimer,
+		totalRounds:  _totalRounds,
 		currentRound: 0,
 		promptsSet:   false,
 		players:      []*Player{},
@@ -117,6 +158,7 @@ func gameStateToJSON(game Game) string {
 	gameJsonString := ""
 	gameJsonString += "{"
 	gameJsonString += "\"gameName\": \"" + game.gameName + "\","
+	gameJsonString += "\"roundTimer\": " + fmt.Sprint(game.roundTimer) + ","
 	gameJsonString += "\"totalRounds\": " + fmt.Sprint(game.totalRounds) + ","
 	gameJsonString += "\"currentRound\": " + fmt.Sprint(game.currentRound) + ","
 	gameJsonString += "\"promptsSet\": " + fmt.Sprint(game.promptsSet) + ","
@@ -608,14 +650,47 @@ func toPaletted(img image.Image) *image.Paletted {
 	return palettedImg
 }
 
-func calcTextWidth(text string, font *truetype.Font, fontSize float64) int {
-	face := truetype.NewFace(font, &truetype.Options{
-		Size: fontSize,
-	})
+func wrapText(text string, face font.Face, maxWidth int) []string {
+	var lines []string
+	words := strings.Fields(text)
+	if len(words) == 0 {
+		return lines
+	}
+
+	spaceWidth, _ := face.GlyphAdvance(' ')
+	spaceWidthInt := int(spaceWidth >> 6)
+
+	var lineWords []string
+	lineWidth := 0
+
+	for _, word := range words {
+		wordWidth := calcTextWidth(word, face)
+		if lineWidth+wordWidth > maxWidth && len(lineWords) > 0 {
+			// Start a new line
+			lines = append(lines, strings.Join(lineWords, " "))
+			lineWords = []string{word}
+			lineWidth = wordWidth + spaceWidthInt
+		} else {
+			if len(lineWords) > 0 {
+				lineWidth += spaceWidthInt
+			}
+			lineWords = append(lineWords, word)
+			lineWidth += wordWidth
+		}
+	}
+	// Add the last line
+	if len(lineWords) > 0 {
+		lines = append(lines, strings.Join(lineWords, " "))
+	}
+
+	return lines
+}
+
+func calcTextWidth(text string, face font.Face) int {
 	width := 0
 	for _, x := range text {
-		awidth, ok := face.GlyphAdvance(rune(x))
-		if ok == false {
+		awidth, ok := face.GlyphAdvance(x)
+		if ok != true {
 			continue
 		}
 		width += int(awidth >> 6)
@@ -627,13 +702,14 @@ func createCaptionImage(caption string) string {
 	// This function creates an image with the caption text
 	captionImagePath := ""
 	// Create a new 1024x1024 image with a white background
-	img := image.NewRGBA(image.Rect(0, 0, 1024, 1024))
-	white := image.White
+	imgWidth := 1024
+	imgHeight := 1024
+	img := image.NewRGBA(image.Rect(0, 0, imgWidth, imgHeight))
+	white := color.White
 	draw.Draw(img, img.Bounds(), &image.Uniform{white}, image.Point{}, draw.Src)
 
-	// Draw the caption text onto the image
 	// Load the font
-	fontBytes, err := os.ReadFile("fonts/Roboto-Regular.ttf")
+	fontBytes, err := os.ReadFile("fonts/" + fontName)
 	if err != nil {
 		fmt.Println("Error loading font:", err)
 		return ""
@@ -648,25 +724,57 @@ func createCaptionImage(caption string) string {
 	c := freetype.NewContext()
 	c.SetDPI(72)
 	c.SetFont(f)
-	c.SetFontSize(48) // Adjust font size as needed
 	c.SetClip(img.Bounds())
 	c.SetDst(img)
 	c.SetSrc(image.Black) // Set text color
 
-	// Calculate the position for the text to be centered
-	textWidth := calcTextWidth(caption, f, 48)
-	x := (img.Bounds().Dx() - textWidth) / 2
-	y := img.Bounds().Dy() / 2
+	// Starting font size
+	fontSize := 48.0
+	minFontSize := 12.0
+	maxWidth := imgWidth - 40 // Allow some padding
 
-	// Draw the text
-	pt := freetype.Pt(x, y+int(c.PointToFixed(48)>>6))
-	_, err = c.DrawString(caption, pt)
-	if err != nil {
-		fmt.Println("Error drawing text:", err)
+	var lines []string
+	var totalTextHeight int
+	var face font.Face
+	var lineHeight int
+
+	// Adjust font size to fit text vertically
+	for fontSize >= minFontSize {
+		c.SetFontSize(fontSize)
+		face = truetype.NewFace(f, &truetype.Options{
+			Size: fontSize,
+		})
+		lines = wrapText(caption, face, maxWidth)
+		lineHeight = c.PointToFixed(fontSize * 1.5).Ceil() // Adjust line spacing
+		totalTextHeight = lineHeight * len(lines)
+		if totalTextHeight <= imgHeight-40 { // Allow some vertical padding
+			break
+		}
+		fontSize -= 2 // Decrease font size and try again
+	}
+
+	if fontSize < minFontSize {
+		fmt.Println("Text is too long to fit into the image")
 		return ""
 	}
 
-	// Generate a short hash for the filename
+	// Starting vertical position
+	y := (imgHeight - totalTextHeight) / 2
+
+	// Draw each line
+	for _, line := range lines {
+		textWidth := calcTextWidth(line, face)
+		x := (imgWidth - textWidth) / 2
+		pt := freetype.Pt(x, y+int(c.PointToFixed(fontSize)>>6))
+		_, err = c.DrawString(line, pt)
+		if err != nil {
+			fmt.Println("Error drawing text:", err)
+			return ""
+		}
+		y += lineHeight
+	}
+
+	// Generate a short hash for the filename (implement your own generateShortHash)
 	hash := generateShortHash()
 	if hash == "" {
 		fmt.Println("Error generating file name")
@@ -701,6 +809,42 @@ func createCaptionImage(caption string) string {
 	return captionImagePath
 }
 
+func renameImage(oldPath, newPath string) error {
+	err := os.Rename(oldPath, newPath)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func getNonSubmissionImagePath(captionOrDrawing string) string {
+	_imageName := nonSubmissionImageName_drawing
+	_string := nonSubmissionString_drawing
+
+	if captionOrDrawing == "caption" {
+		_imageName = nonSubmissionImageName_caption
+		_string = nonSubmissionString_caption
+	} else if captionOrDrawing == "drawing" {
+		_imageName = nonSubmissionImageName_drawing
+		_string = nonSubmissionString_drawing
+	} else {
+		fmt.Println("Error: invalid argument for getNonSubmissionImagePath()")
+		return ""
+	}
+
+	imagePath := imagesDir + string(os.PathSeparator) + _imageName
+	if _, err := os.Stat(imagePath); os.IsNotExist(err) {
+		newImagePath := createCaptionImage(_string)
+		err := renameImage(newImagePath, imagePath)
+		if err != nil {
+			fmt.Println("Error renaming image:", err)
+			return ""
+		}
+	}
+
+	return imagePath
+}
+
 func createGif(drawings, captions []string) string {
 	// Ensure the number of drawings and captions match
 	if len(drawings) != len(captions) {
@@ -712,7 +856,13 @@ func createGif(drawings, captions []string) string {
 
 	for i := 0; i < len(drawings); i++ {
 		// Create caption image
-		captionImagePath := createCaptionImage(captions[i])
+		caption := captions[i]
+		captionImagePath := ""
+		if caption == "" {
+			captionImagePath = getNonSubmissionImagePath("caption")
+		} else {
+			captionImagePath = createCaptionImage(captions[i])
+		}
 		if captionImagePath == "" {
 			fmt.Println("Error creating caption image")
 			return ""
@@ -733,7 +883,12 @@ func createGif(drawings, captions []string) string {
 		gifImages.Delay = append(gifImages.Delay, 300)
 
 		// Get drawing image path
-		drawingImagePath := parseImagePathFromUrl(drawings[i])
+		drawingUrl := drawings[i]
+		if drawingUrl == "" {
+			drawingUrl = "/" + getNonSubmissionImagePath("drawing")
+			// The / is added to ensure the string is parsed correctly in the next step
+		}
+		drawingImagePath := parseImagePathFromUrl(drawingUrl)
 		if drawingImagePath == "" {
 			fmt.Println("Error parsing drawing image path")
 			return ""
@@ -849,5 +1004,7 @@ func main() {
 	fs := http.FileServer(http.Dir("images"))
 	http.Handle("/images/", http.StripPrefix("/images/", fs))
 	// example: http://localhost:9119/images/12345678.png
+	getNonSubmissionImagePath("caption")
+	getNonSubmissionImagePath("drawing")
 	http.ListenAndServe(":9119", nil)
 }
