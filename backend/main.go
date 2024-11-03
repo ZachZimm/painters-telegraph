@@ -6,10 +6,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"image"
+	"image/color/palette"
+	"image/gif"
 	"image/png"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
 
+	"github.com/golang/freetype"
+	"github.com/golang/freetype/truetype"
 	"golang.org/x/image/draw"
 )
 
@@ -210,6 +216,7 @@ func _endGame(gameName string) {
 	// TODO Implement logic for ending a game and creating GIFs, as well as a final game state that can be reviewed
 	// Set the queued messages for the players to view the final game state
 	game := games[gameName]
+	createGifsFromGame(game)
 	for _, p := range game.players {
 		p.queuedMessage = gameEndedMessage + "\"gameResults\": " + "\"TODO\"}"
 	}
@@ -563,6 +570,243 @@ func uploadDrawing(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, responseStr)
 }
 
+func parseImagePathFromUrl(inputUrl string) string {
+	// given  a URL like http://localhost:8080/images/12345678.png it should return "images/12345678.png"
+	returnString := ""
+	if strings.HasPrefix(inputUrl, "/") {
+		returnString = strings.TrimPrefix(inputUrl, "/")
+	}
+	return returnString
+}
+
+func extractHashFromImagePath(imagePath string) string {
+	filename := filepath.Base(imagePath)      // e.g., "12345678.png"
+	ext := filepath.Ext(filename)             // e.g., ".png"
+	hash := strings.TrimSuffix(filename, ext) // e.g., "12345678"
+	return hash
+}
+
+func loadImage(path string) (image.Image, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	img, _, err := image.Decode(file)
+	if err != nil {
+		return nil, err
+	}
+	return img, nil
+}
+
+// Helper function to convert an image to *image.Paletted
+func toPaletted(img image.Image) *image.Paletted {
+	bounds := img.Bounds()
+	palettedImg := image.NewPaletted(bounds, palette.Plan9)
+	draw.FloydSteinberg.Draw(palettedImg, bounds, img, image.Point{})
+	return palettedImg
+}
+
+func calcTextWidth(text string, font *truetype.Font, fontSize float64) int {
+	face := truetype.NewFace(font, &truetype.Options{
+		Size: fontSize,
+	})
+	width := 0
+	for _, x := range text {
+		awidth, ok := face.GlyphAdvance(rune(x))
+		if ok == false {
+			continue
+		}
+		width += int(awidth >> 6)
+	}
+	return width
+}
+
+func createCaptionImage(caption string) string {
+	// This function creates an image with the caption text
+	captionImagePath := ""
+	// Create a new 1024x1024 image with a white background
+	img := image.NewRGBA(image.Rect(0, 0, 1024, 1024))
+	white := image.White
+	draw.Draw(img, img.Bounds(), &image.Uniform{white}, image.Point{}, draw.Src)
+
+	// Draw the caption text onto the image
+	// Load the font
+	fontBytes, err := os.ReadFile("fonts/Roboto-Regular.ttf")
+	if err != nil {
+		fmt.Println("Error loading font:", err)
+		return ""
+	}
+	f, err := freetype.ParseFont(fontBytes)
+	if err != nil {
+		fmt.Println("Error parsing font:", err)
+		return ""
+	}
+
+	// Initialize the context
+	c := freetype.NewContext()
+	c.SetDPI(72)
+	c.SetFont(f)
+	c.SetFontSize(48) // Adjust font size as needed
+	c.SetClip(img.Bounds())
+	c.SetDst(img)
+	c.SetSrc(image.Black) // Set text color
+
+	// Calculate the position for the text to be centered
+	textWidth := calcTextWidth(caption, f, 48)
+	x := (img.Bounds().Dx() - textWidth) / 2
+	y := img.Bounds().Dy() / 2
+
+	// Draw the text
+	pt := freetype.Pt(x, y+int(c.PointToFixed(48)>>6))
+	_, err = c.DrawString(caption, pt)
+	if err != nil {
+		fmt.Println("Error drawing text:", err)
+		return ""
+	}
+
+	// Generate a short hash for the filename
+	hash := generateShortHash()
+	if hash == "" {
+		fmt.Println("Error generating file name")
+		return ""
+	}
+
+	// Ensure the images directory exists
+	if _, err := os.Stat("images"); os.IsNotExist(err) {
+		err = os.Mkdir("images", os.ModePerm)
+		if err != nil {
+			fmt.Println("Error creating images directory")
+			return ""
+		}
+	}
+
+	// Create the output file
+	captionImagePath = fmt.Sprintf("images/%s.png", hash)
+	outFile, err := os.Create(captionImagePath)
+	if err != nil {
+		fmt.Println("Unable to create the file for writing")
+		return ""
+	}
+	defer outFile.Close()
+
+	// Save the image in PNG format
+	err = png.Encode(outFile, img)
+	if err != nil {
+		fmt.Println("Error encoding image to PNG")
+		return ""
+	}
+
+	return captionImagePath
+}
+
+func createGif(drawings, captions []string) string {
+	// Ensure the number of drawings and captions match
+	if len(drawings) != len(captions) {
+		fmt.Println("Error: number of drawings and captions do not match")
+		return ""
+	}
+
+	var gifImages gif.GIF
+
+	for i := 0; i < len(drawings); i++ {
+		// Create caption image
+		captionImagePath := createCaptionImage(captions[i])
+		if captionImagePath == "" {
+			fmt.Println("Error creating caption image")
+			return ""
+		}
+
+		// Load caption image
+		captionImg, err := loadImage(captionImagePath)
+		if err != nil {
+			fmt.Println("Error loading caption image:", err)
+			return ""
+		}
+
+		// Convert to paletted image
+		captionPaletted := toPaletted(captionImg)
+
+		// Add to GIF frames with 3 seconds delay (300 units)
+		gifImages.Image = append(gifImages.Image, captionPaletted)
+		gifImages.Delay = append(gifImages.Delay, 300)
+
+		// Get drawing image path
+		drawingImagePath := parseImagePathFromUrl(drawings[i])
+		if drawingImagePath == "" {
+			fmt.Println("Error parsing drawing image path")
+			return ""
+		}
+
+		// Load drawing image
+		drawingImg, err := loadImage(drawingImagePath)
+		if err != nil {
+			fmt.Println("Error loading drawing image:", err)
+			return ""
+		}
+
+		// Convert to paletted image
+		drawingPaletted := toPaletted(drawingImg)
+
+		// Add to GIF frames with 5 seconds delay (500 units)
+		gifImages.Image = append(gifImages.Image, drawingPaletted)
+		gifImages.Delay = append(gifImages.Delay, 500)
+	}
+
+	// Ensure the gifs directory exists
+	if _, err := os.Stat("gifs"); os.IsNotExist(err) {
+		err = os.Mkdir("gifs", os.ModePerm)
+		if err != nil {
+			fmt.Println("Error creating gifs directory:", err)
+			return ""
+		}
+	}
+
+	// Get the hash from the first drawing to name the GIF
+	firstDrawingImagePath := parseImagePathFromUrl(drawings[0])
+	gifHash := extractHashFromImagePath(firstDrawingImagePath)
+	gifFilePath := fmt.Sprintf("gifs/%s.gif", gifHash)
+
+	// Create the output file
+	outFile, err := os.Create(gifFilePath)
+	if err != nil {
+		fmt.Println("Unable to create the gif file for writing:", err)
+		return ""
+	}
+	defer outFile.Close()
+
+	// Encode the GIF and write to file
+	err = gif.EncodeAll(outFile, &gifImages)
+	if err != nil {
+		fmt.Println("Error encoding gif:", err)
+		return ""
+	}
+
+	return gifFilePath
+}
+
+func createGifsFromGame(game *Game) []string {
+	// Create a GIF for each prompt drawing chain
+	var gifFilePaths []string
+	for i := 0; i < len(game.prompts); i++ {
+		// Get the prompt chain and the drawing chain
+		promptChain := game.prompts[i]
+		drawingChain := game.drawings[i]
+
+		// Create a GIF from the prompt chain
+		gifFilePath := createGif(drawingChain, promptChain)
+		if gifFilePath == "" {
+			fmt.Println("Error creating GIF from prompt chain")
+			continue
+		}
+
+		gifFilePaths = append(gifFilePaths, gifFilePath)
+	}
+
+	return gifFilePaths
+}
+
 // -An endpoint to end a game
 // -An endpoint to end a round
 // -An endpoint to get a game's current game state
@@ -582,10 +826,11 @@ func uploadDrawing(w http.ResponseWriter, r *http.Request) {
 // -Function for resizing uploaded images
 //
 // Functions for when the game ends
-// 		Create a GIF from each prompt drawing chain
-// 		Game state should be transfered to a new map of completed games, accessible by a different endpoint
+// 		-Create a GIF from each prompt drawing chain
+// 		-Game state should be transfered to a new map of completed games, accessible by a different endpoint
+// -Function for creating GIFs from images and captions
+//
 // Routine for automatically progressing the game based on a configurable timer
-// Function for creating GIFs from images and captions
 
 func main() {
 	http.HandleFunc("/createGame", createGame)
@@ -604,6 +849,5 @@ func main() {
 	fs := http.FileServer(http.Dir("images"))
 	http.Handle("/images/", http.StripPrefix("/images/", fs))
 	// example: http://localhost:9119/images/12345678.png
-
 	http.ListenAndServe(":9119", nil)
 }
