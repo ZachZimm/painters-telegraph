@@ -23,6 +23,7 @@ import (
 )
 
 var games map[string]*Game = make(map[string]*Game)
+var endedGames map[string]*EndedGame = make(map[string]*EndedGame)
 var players map[string]*Player = make(map[string]*Player)
 var (
 	newPlayerMessage               = "{\"message\":\"You have not yet joined a game\"}"
@@ -37,6 +38,7 @@ var (
 	imagesDir                      = "images"
 	nonSubmissionImageName_drawing = "non_submission_drawing.png"
 	nonSubmissionImageName_caption = "non_submission_caption.png"
+	baseUrl                        = ""
 )
 
 type Player struct {
@@ -48,6 +50,7 @@ type Player struct {
 // Game struct
 type Game struct {
 	gameName     string
+	gameId       string
 	roundTimer   int
 	totalRounds  int
 	currentRound int
@@ -57,6 +60,14 @@ type Game struct {
 	spectators   []*Player
 	prompts      [][]string
 	drawings     [][]string
+}
+
+type EndedGame struct {
+	gameName string
+	gameId   string
+	prompts  [][]string
+	drawings [][]string
+	gifs     []string
 }
 
 func getPlayerIndex(playerName string, game *Game) int {
@@ -90,6 +101,10 @@ func getPlayerQueuedMessage(w http.ResponseWriter, r *http.Request) {
 
 // An endpoint to create a new game
 func createGame(w http.ResponseWriter, r *http.Request) {
+	if baseUrl == "" {
+		baseUrl = getBaseURL(r)
+	}
+
 	// Create a new game
 	jsonObject := parseBodyObject(r)
 	// parse the JSON object for the fields, and use default values if they are not provided
@@ -122,8 +137,13 @@ func createGame(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	hash := make([]byte, 16)
+	rand.Read(hash)
+	_gameId := hex.EncodeToString(hash)
+
 	game := &Game{
 		gameName:     _gameName,
+		gameId:       _gameId,
 		roundTimer:   _roundTimer,
 		totalRounds:  _totalRounds,
 		currentRound: 0,
@@ -153,11 +173,70 @@ func listGames(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, responseStr)
 }
 
+func listEndedGames(w http.ResponseWriter, r *http.Request) {
+	// Loop through the endedGames map and return the game ids
+	responseStr := "{\"status\":\"OK\", \"games\": ["
+	for key := range endedGames {
+		responseStr += "\"" + key + "\","
+	}
+	if len(endedGames) > 0 {
+		responseStr = responseStr[:len(responseStr)-1]
+	}
+	responseStr += "]}"
+	fmt.Fprintf(w, responseStr)
+}
+
+func endedGameStateToJSON(endedGame EndedGame) string {
+	gameJsonString := ""
+	gameJsonString += "{"
+	gameJsonString += "\"gameName\": \"" + endedGame.gameName + "\","
+	gameJsonString += "\"gameId\": \"" + endedGame.gameId + "\","
+	gameJsonString += "\"prompts\": ["
+	for _, prompt := range endedGame.prompts {
+		gameJsonString += "["
+		for _, word := range prompt {
+			gameJsonString += "\"" + word + "\","
+		}
+		gameJsonString = gameJsonString[:len(gameJsonString)-1]
+		gameJsonString += "],"
+	}
+	if len(endedGame.prompts) > 0 {
+		gameJsonString = gameJsonString[:len(gameJsonString)-1]
+	}
+	gameJsonString += "],"
+	gameJsonString += "\"drawings\": ["
+	for _, drawing := range endedGame.drawings {
+		gameJsonString += "["
+		for _, word := range drawing {
+			gameJsonString += "\"" + word + "\","
+		}
+		gameJsonString = gameJsonString[:len(gameJsonString)-1]
+		gameJsonString += "],"
+	}
+	if len(endedGame.drawings) > 0 {
+		gameJsonString = gameJsonString[:len(gameJsonString)-1]
+	}
+	gameJsonString += "],"
+	gameJsonString += "\"gifs\": ["
+	for _, gif := range endedGame.gifs {
+		gameJsonString += "["
+		gameJsonString += "\"" + gif + "\","
+		gameJsonString += "],"
+	}
+	if len(endedGame.gifs) > 0 {
+		gameJsonString = gameJsonString[:len(gameJsonString)-1]
+	}
+	gameJsonString += "]"
+	gameJsonString += "}"
+	return gameJsonString
+}
+
 func gameStateToJSON(game Game) string {
 	// Convert the game state to JSON
 	gameJsonString := ""
 	gameJsonString += "{"
 	gameJsonString += "\"gameName\": \"" + game.gameName + "\","
+	gameJsonString += "\"gameId\": \"" + game.gameId + "\","
 	gameJsonString += "\"roundTimer\": " + fmt.Sprint(game.roundTimer) + ","
 	gameJsonString += "\"totalRounds\": " + fmt.Sprint(game.totalRounds) + ","
 	gameJsonString += "\"currentRound\": " + fmt.Sprint(game.currentRound) + ","
@@ -223,6 +302,19 @@ func getGameState(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, gameStateJSON)
 }
 
+func getEndedGame(w http.ResponseWriter, r *http.Request) {
+	// Parse the request body
+	jsonObject := parseBodyObject(r)
+	endedGame, ok := endedGames[jsonObject["gameId"]]
+	if !ok {
+		responseStr := "{\"status\": \"ERROR\", \"message\": \"Game not found\"}"
+		fmt.Fprintf(w, responseStr)
+		return
+	}
+	endedGameStateJSON := endedGameStateToJSON(*endedGame)
+	fmt.Fprintf(w, endedGameStateJSON)
+}
+
 func startGame(w http.ResponseWriter, r *http.Request) {
 	jsonObject := parseBodyObject(r)
 	gameName := jsonObject["gameName"]
@@ -233,7 +325,13 @@ func startGame(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if game.gameStarted == false {
+	if len(game.players) == 0 {
+		responseStr := "{\"status\": \"ERROR\", \"message\": \"No players in game\"}"
+		fmt.Fprintf(w, responseStr)
+	} else if game.gameStarted == false {
+		if game.totalRounds <= 0 {
+			game.totalRounds = len(game.players)
+		}
 		game.gameStarted = true
 		game.prompts = make([][]string, len(game.players))
 		game.drawings = make([][]string, len(game.players))
@@ -260,10 +358,18 @@ func _endGame(gameName string) {
 	// 	 But no players, spectators, timers, etc.
 	game := games[gameName]
 	gifs := createGifsFromGame(game)
-	_ = gifs
+
+	endedGame := EndedGame{
+		gameName: game.gameName,
+		gameId:   game.gameId,
+		prompts:  game.prompts,
+		drawings: game.drawings,
+		gifs:     gifs,
+	}
+	endedGames[game.gameId] = &endedGame
 
 	for _, p := range game.players {
-		p.queuedMessage = gameEndedMessage + "\"gameResults\": " + "\"TODO\"}"
+		p.queuedMessage = gameEndedMessage + ",\"gameResults\": " + "\"TODO\"}"
 	}
 	delete(games, gameName)
 }
@@ -283,30 +389,31 @@ func _endRound(gameName string) bool {
 	}
 
 	if game.promptsSet == false {
+		// if game.currentRound == game.totalRounds-1 {
+		// 	_endGame(gameName)
+		// } else {
+		// set queued messages for players to draw
+		for i, p := range game.players {
+			p.queuedMessage = drawPromptMessage + "\"prompt\": \"" + game.prompts[i][game.currentRound] + "\"}"
+		}
+
+		game.promptsSet = true
+		return true
+		// }
+	} else {
+		// set queued messages for players to caption the drawings
+		for i, p := range game.players {
+			p.queuedMessage = captionPromptMessage + "\"image\": \"" + game.drawings[i][game.currentRound] + "\"}"
+		}
+
+		game.currentRound++
 		if game.currentRound == game.totalRounds {
 			_endGame(gameName)
-		} else {
-			// set queued messages for players to draw
-			for i, p := range game.players {
-				p.queuedMessage = drawPromptMessage + "\"prompt\": \"" + game.prompts[i][game.currentRound] + "\"}"
-			}
-
-			game.promptsSet = true
 			return true
 		}
-	} else {
-		if game.currentRound != game.totalRounds {
-			// set queued messages for players to caption the drawings
-			for i, p := range game.players {
-				p.queuedMessage = captionPromptMessage + "\"image\": \"" + game.drawings[i][game.currentRound] + "\"}"
-			}
-
-			game.currentRound++
-			game.promptsSet = false
-			return true
-		}
+		game.promptsSet = false
+		return true
 	}
-	return false
 }
 
 func endRound(w http.ResponseWriter, r *http.Request) {
@@ -317,11 +424,8 @@ func endRound(w http.ResponseWriter, r *http.Request) {
 	// Implement logic for either serving prompts or drawings to players
 	// This will be done using the round number as an offset to the player index
 	// First round player 1 creates prompt 1, player 2 gets prompt 1, player 3 gets prompt 2, etc.
-	// fmt.Fprintf(w, "Round ended")
 	responseStr := "{\"status\": \"OK\", \"message\": \"Round ended\"}"
 	fmt.Fprintf(w, responseStr)
-
-	// Remove the game from the games map if the game is over
 }
 
 func authenticatePlayer(givenPlayerName, givenPlayerSecret string) bool {
@@ -379,7 +483,6 @@ func joinGame(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintf(w, responseStr)
 		} else {
 			game.spectators = append(game.spectators, player)
-			// fmt.Fprintf(w, "Player joined game as spectator")
 			responseStr := "{\"status\": \"OK\", \"message\": \"Player joined game as spectator\"}"
 			fmt.Fprintf(w, responseStr)
 		}
@@ -388,6 +491,26 @@ func joinGame(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, responseStr)
 		return
 	}
+}
+
+func progressGameIfReady(game *Game) {
+	// Progress the game by calling _endRound() if all prompts are set and promptsSet is false
+	// or if promptsSet is true and all drawings for this round are submitted
+	roundNumber := game.currentRound
+	if game.promptsSet == false {
+		for _, promptSlice := range game.prompts {
+			if promptSlice[roundNumber] == "" {
+				return
+			}
+		}
+	} else {
+		for _, drawingSlice := range game.drawings {
+			if drawingSlice[roundNumber] == "" {
+				return
+			}
+		}
+	}
+	_endRound(game.gameName)
 }
 
 func submitPrompt(w http.ResponseWriter, r *http.Request) {
@@ -434,6 +557,7 @@ func submitPrompt(w http.ResponseWriter, r *http.Request) {
 			game.prompts[gameRotationIndex][game.currentRound] = prompt
 			responseStr := "{\"status\": \"OK\", \"message\": \"Prompt submitted\"}"
 			fmt.Fprintf(w, responseStr)
+			progressGameIfReady(game)
 		} else {
 			responseStr := "{\"status\": \"ERROR\", \"message\": \"Prompt already submitted\"}"
 			fmt.Fprintf(w, responseStr)
@@ -490,6 +614,8 @@ func submitDrawing(w http.ResponseWriter, r *http.Request) {
 			game.drawings[gameRotationIndex][game.currentRound] = drawing
 			responseStr := "{\"status\": \"OK\", \"message\": \"Drawing submitted\"}"
 			fmt.Fprintf(w, responseStr)
+			progressGameIfReady(game)
+
 		} else {
 			responseStr := "{\"status\": \"ERROR\", \"message\": \"Drawing already submitted\"}"
 			fmt.Fprintf(w, responseStr)
@@ -618,9 +744,13 @@ func uploadDrawing(w http.ResponseWriter, r *http.Request) {
 func parseImagePathFromUrl(inputUrl string) string {
 	// given  a URL like http://localhost:8080/images/12345678.png it should return "images/12345678.png"
 	returnString := ""
-	if strings.HasPrefix(inputUrl, "/") {
-		returnString = strings.TrimPrefix(inputUrl, "/")
+	finalSlashIndex := strings.LastIndex(inputUrl, "/")
+	if finalSlashIndex != -1 {
+		returnString = imagesDir + string(os.PathSeparator) + inputUrl[finalSlashIndex+1:]
+	} else {
+		returnString = inputUrl
 	}
+
 	return returnString
 }
 
@@ -940,14 +1070,14 @@ func createGif(drawings, captions []string) string {
 		fmt.Println("Error encoding gif:", err)
 		return ""
 	}
-
+	fmt.Println("GIF created successfully")
 	return gifFilePath
 }
 
 func createGifsFromGame(game *Game) []string {
 	// Create a GIF for each prompt drawing chain
 	var gifFilePaths []string
-	for i := 0; i < len(game.prompts); i++ {
+	for i := 0; i <= len(game.prompts)-1; i++ {
 		// Get the prompt chain and the drawing chain
 		promptChain := game.prompts[i]
 		drawingChain := game.drawings[i]
@@ -994,6 +1124,7 @@ func main() {
 	http.HandleFunc("/createGame", createGame)
 	http.HandleFunc("/listGames", listGames)
 	http.HandleFunc("/getGameState", getGameState)
+	http.HandleFunc("/getEndedGame", getEndedGame)
 	http.HandleFunc("/startGame", startGame)
 	http.HandleFunc("/endGame", endGame)
 	http.HandleFunc("/endRound", endRound)
@@ -1004,9 +1135,10 @@ func main() {
 	http.HandleFunc("/uploadDrawing", uploadDrawing)
 	http.HandleFunc("/getPlayerMessage", getPlayerQueuedMessage)
 
-	fs := http.FileServer(http.Dir("images"))
-	http.Handle("/images/", http.StripPrefix("/images/", fs))
+	is := http.FileServer(http.Dir("images"))
+	http.Handle("/images/", http.StripPrefix("/images/", is))
 	// example: http://localhost:9119/images/12345678.png
-	http.Handle("/gifs/", http.StripPrefix("/gifs/", fs))
+	gs := http.FileServer(http.Dir("images"))
+	http.Handle("/gifs/", http.StripPrefix("/gifs/", gs))
 	http.ListenAndServe(":9119", nil)
 }
