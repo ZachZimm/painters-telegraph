@@ -26,12 +26,12 @@ var games map[string]*Game = make(map[string]*Game)
 var endedGames map[string]*EndedGame = make(map[string]*EndedGame)
 var players map[string]*Player = make(map[string]*Player)
 var (
-	newPlayerMessage               = "{\"message\":\"You have not yet joined a game\"}"
-	joinedGameMessage              = "{\"message\":\"You have joined the game\"}"
-	gameStartedMessage             = "{\"message\":\"Write an interesting prompt!\"}"
-	drawPromptMessage              = "{\"message\":\"Draw the prompt!\""
-	captionPromptMessage           = "{\"message\":\"Write a caption for the drawing!\""
-	gameEndedMessage               = "{\"message\":\"The game has ended, check the results!\""
+	newPlayerMessage               = "{\"status\": \"OK\", \"message\":\"You have not yet joined a game\"}"
+	joinedGameMessage              = "{\"status\": \"OK\", \"message\":\"You have joined the game\"}"
+	gameStartedMessage             = "{\"status\": \"OK\", \"message\":\"Write an interesting prompt!\"}"
+	drawPromptMessage              = "{\"status\": \"OK\", \"message\":\"Draw the prompt!\""
+	captionPromptMessage           = "{\"status\": \"OK\", \"message\":\"Write a caption for the drawing!\""
+	gameEndedMessage               = "{\"status\": \"OK\", \"message\":\"The game has ended, check the results!\""
 	nonSubmissionString_drawing    = "Uh oh. Looks like someone forgot to submit their drawing =/"
 	nonSubmissionString_caption    = "Uh oh. Looks like someone forgot to submit their caption =/"
 	fontName                       = "Roboto-Regular.ttf"
@@ -369,7 +369,7 @@ func _endGame(gameName string) {
 	endedGames[game.gameId] = &endedGame
 
 	for _, p := range game.players {
-		p.queuedMessage = gameEndedMessage + ",\"gameResults\": " + "\"TODO\"}"
+		p.queuedMessage = gameEndedMessage + ",\"endedGameId\": " + "\"" + game.gameId + "\"}"
 	}
 	delete(games, gameName)
 }
