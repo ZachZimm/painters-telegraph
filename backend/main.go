@@ -87,103 +87,142 @@ func parseBodyObject(r *http.Request) map[string]string {
 	return bodyObj
 }
 
+func allowCors(w *http.ResponseWriter) {
+	(*w).Header().Set("Access-Control-Allow-Origin", "*")
+	(*w).Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	(*w).Header().Set("Access-Control-Allow-Headers", "Content-Type")
+}
+
 func getPlayerQueuedMessage(w http.ResponseWriter, r *http.Request) {
-	jsonObject := parseBodyObject(r)
-	playerName := jsonObject["playerName"]
-	player, err := players[playerName]
-	if !err {
-		responseStr := "{\"status\": \"ERROR\", \"message\": \"Player not found\"}"
-		fmt.Fprintf(w, responseStr)
+	allowCors(&w)
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
 		return
+	} else if r.Method == "POST" {
+		w.Header().Set("Content-Type", "application/json")
+		jsonObject := parseBodyObject(r)
+		playerName := jsonObject["playerName"]
+		player, err := players[playerName]
+		if !err {
+			responseStr := "{\"status\": \"ERROR\", \"message\": \"Player not found\"}"
+			fmt.Fprintf(w, responseStr)
+			return
+		}
+		fmt.Fprintf(w, player.queuedMessage)
+	} else {
+		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
-	fmt.Fprintf(w, player.queuedMessage)
 }
 
 // An endpoint to create a new game
 func createGame(w http.ResponseWriter, r *http.Request) {
-	if baseUrl == "" {
-		baseUrl = getBaseURL(r)
-	}
-
-	// Create a new game
-	jsonObject := parseBodyObject(r)
-	// parse the JSON object for the fields, and use default values if they are not provided
-	_gameName := jsonObject["gameName"]
-	if _gameName == "" {
-		fmt.Fprintf(w, "{\"status\": \"ERROR\", \"message\": \"gameName is required\"}")
+	allowCors(&w)
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
 		return
-	}
-	// Check if the game already exists
-	// If the game already exists, return an error
-	if _, ok := games[_gameName]; ok {
-		fmt.Fprintf(w, "{\"status\": \"ERROR\", \"message\": \"Game "+jsonObject["gameName"]+" already exists\"}")
-		return
-	}
-	if jsonObject["totalRounds"] == "" {
-		jsonObject["totalRounds"] = "3"
-	}
-	// try to parse an int from the totalRounds field
-	_totalRounds, err := strconv.Atoi(jsonObject["totalRounds"])
-	if err != nil {
-		fmt.Fprintf(w, "{\"status\": \"ERROR\", \"message\": \"totalRounds must be an integer\"}")
-		return
-	}
-	if jsonObject["roundTimer"] == "" {
-		jsonObject["roundTimer"] = "60"
-	}
-	_roundTimer, err := strconv.Atoi(jsonObject["roundTimer"])
-	if err != nil {
-		fmt.Fprintf(w, "{\"status\": \"ERROR\", \"message\": \"roundTimer must be an integer\"}")
-		return
-	}
+	} else if r.Method == "POST" {
+		if baseUrl == "" {
+			baseUrl = getBaseURL(r)
+		}
 
-	hash := make([]byte, 16)
-	rand.Read(hash)
-	_gameId := hex.EncodeToString(hash)
+		// Create a new game
+		jsonObject := parseBodyObject(r)
+		// parse the JSON object for the fields, and use default values if they are not provided
+		_gameName := jsonObject["gameName"]
+		if _gameName == "" {
+			fmt.Fprintf(w, "{\"status\": \"ERROR\", \"message\": \"gameName is required\"}")
+			return
+		}
+		// Check if the game already exists
+		// If the game already exists, return an error
+		if _, ok := games[_gameName]; ok {
+			fmt.Fprintf(w, "{\"status\": \"ERROR\", \"message\": \"Game "+jsonObject["gameName"]+" already exists\"}")
+			return
+		}
+		if jsonObject["totalRounds"] == "" {
+			jsonObject["totalRounds"] = "3"
+		}
+		// try to parse an int from the totalRounds field
+		_totalRounds, err := strconv.Atoi(jsonObject["totalRounds"])
+		if err != nil {
+			fmt.Fprintf(w, "{\"status\": \"ERROR\", \"message\": \"totalRounds must be an integer\"}")
+			return
+		}
+		if jsonObject["roundTimer"] == "" {
+			jsonObject["roundTimer"] = "60"
+		}
+		_roundTimer, err := strconv.Atoi(jsonObject["roundTimer"])
+		if err != nil {
+			fmt.Fprintf(w, "{\"status\": \"ERROR\", \"message\": \"roundTimer must be an integer\"}")
+			return
+		}
 
-	game := &Game{
-		gameName:     _gameName,
-		gameId:       _gameId,
-		roundTimer:   _roundTimer,
-		totalRounds:  _totalRounds,
-		currentRound: 0,
-		promptsSet:   false,
-		players:      []*Player{},
-		spectators:   []*Player{},
-		prompts:      [][]string{},
-		drawings:     [][]string{},
+		hash := make([]byte, 16)
+		rand.Read(hash)
+		_gameId := hex.EncodeToString(hash)
+
+		game := &Game{
+			gameName:     _gameName,
+			gameId:       _gameId,
+			roundTimer:   _roundTimer,
+			totalRounds:  _totalRounds,
+			currentRound: 0,
+			promptsSet:   false,
+			players:      []*Player{},
+			spectators:   []*Player{},
+			prompts:      [][]string{},
+			drawings:     [][]string{},
+		}
+
+		// Add the game to the games map
+		games[game.gameName] = game
+
+		fmt.Fprintf(w, "{\"status\": \"OK\", \"message\": \"Game "+game.gameName+" created\"}")
+	} else {
+		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
-
-	// Add the game to the games map
-	games[game.gameName] = game
-
-	fmt.Fprintf(w, "{\"status\": \"OK\", \"message\": \"Game "+game.gameName+" created\"}")
 }
 
 func listGames(w http.ResponseWriter, r *http.Request) {
-	// Loop through the games map and return the game names
-	responseStr := "{\"status\":\"OK\", \"games\": ["
-	for key := range games {
-		responseStr += "\"" + key + "\","
+	allowCors(&w)
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	} else if r.Method == "GET" {
+		// Loop through the games map and return the game names
+		responseStr := "{\"status\":\"OK\", \"games\": ["
+		for key := range games {
+			responseStr += "\"" + key + "\","
+		}
+		if len(games) > 0 {
+			responseStr = responseStr[:len(responseStr)-1]
+		}
+		responseStr += "]}"
+		fmt.Fprintf(w, responseStr)
+	} else {
+		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
-	if len(games) > 0 {
-		responseStr = responseStr[:len(responseStr)-1]
-	}
-	responseStr += "]}"
-	fmt.Fprintf(w, responseStr)
 }
 
 func listEndedGames(w http.ResponseWriter, r *http.Request) {
-	// Loop through the endedGames map and return the game ids
-	responseStr := "{\"status\":\"OK\", \"games\": ["
-	for key := range endedGames {
-		responseStr += "\"" + key + "\","
+	allowCors(&w)
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	} else if r.Method == "GET" {
+		// Loop through the endedGames map and return the game ids
+		responseStr := "{\"status\":\"OK\", \"games\": ["
+		for key := range endedGames {
+			responseStr += "\"" + key + "\","
+		}
+		if len(endedGames) > 0 {
+			responseStr = responseStr[:len(responseStr)-1]
+		}
+		responseStr += "]}"
+		fmt.Fprintf(w, responseStr)
+	} else {
+		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
-	if len(endedGames) > 0 {
-		responseStr = responseStr[:len(responseStr)-1]
-	}
-	responseStr += "]}"
-	fmt.Fprintf(w, responseStr)
 }
 
 func endedGameStateToJSON(endedGame EndedGame) string {
@@ -291,71 +330,92 @@ func gameStateToJSON(game Game) string {
 }
 
 func getGameState(w http.ResponseWriter, r *http.Request) {
-	jsonObject := parseBodyObject(r)
-	game, ok := games[jsonObject["gameName"]]
-	if !ok {
-		responseStr := "{\"status\": \"ERROR\", \"message\": \"Game not found\"}"
-		fmt.Fprintf(w, responseStr)
+	allowCors(&w)
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
 		return
+	} else if r.Method == "POST" {
+		jsonObject := parseBodyObject(r)
+		game, ok := games[jsonObject["gameName"]]
+		if !ok {
+			responseStr := "{\"status\": \"ERROR\", \"message\": \"Game not found\"}"
+			fmt.Fprintf(w, responseStr)
+			return
+		}
+		gameStateJSON := gameStateToJSON(*game)
+		fmt.Fprintf(w, gameStateJSON)
+	} else {
+		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
-	gameStateJSON := gameStateToJSON(*game)
-	fmt.Fprintf(w, gameStateJSON)
 }
 
 func getEndedGame(w http.ResponseWriter, r *http.Request) {
-	// Parse the request body
-	jsonObject := parseBodyObject(r)
-	endedGame, ok := endedGames[jsonObject["gameId"]]
-	if !ok {
-		responseStr := "{\"status\": \"ERROR\", \"message\": \"Game not found\"}"
-		fmt.Fprintf(w, responseStr)
+	allowCors(&w)
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
 		return
+	} else if r.Method == "POST" {
+		// Parse the request body
+		jsonObject := parseBodyObject(r)
+		endedGame, ok := endedGames[jsonObject["gameId"]]
+		if !ok {
+			responseStr := "{\"status\": \"ERROR\", \"message\": \"Game not found\"}"
+			fmt.Fprintf(w, responseStr)
+			return
+		}
+		endedGameStateJSON := endedGameStateToJSON(*endedGame)
+		fmt.Fprintf(w, endedGameStateJSON)
+	} else {
+		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
-	endedGameStateJSON := endedGameStateToJSON(*endedGame)
-	fmt.Fprintf(w, endedGameStateJSON)
 }
 
 func startGame(w http.ResponseWriter, r *http.Request) {
-	jsonObject := parseBodyObject(r)
-	gameName := jsonObject["gameName"]
-	game, ok := games[gameName]
-	if !ok {
-		responseStr := "{\"status\": \"ERROR\", \"message\": \"Game not found\"}"
-		fmt.Fprintf(w, responseStr)
+	allowCors(&w)
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
 		return
-	}
-
-	if len(game.players) == 0 {
-		responseStr := "{\"status\": \"ERROR\", \"message\": \"No players in game\"}"
-		fmt.Fprintf(w, responseStr)
-	} else if game.gameStarted == false {
-		if game.totalRounds <= 0 {
-			game.totalRounds = len(game.players)
-		}
-		game.gameStarted = true
-		game.prompts = make([][]string, len(game.players))
-		game.drawings = make([][]string, len(game.players))
-		for i := range game.prompts {
-			game.prompts[i] = make([]string, game.totalRounds)
-			game.drawings[i] = make([]string, game.totalRounds)
+	} else if r.Method == "POST" {
+		jsonObject := parseBodyObject(r)
+		gameName := jsonObject["gameName"]
+		game, ok := games[gameName]
+		if !ok {
+			responseStr := "{\"status\": \"ERROR\", \"message\": \"Game not found\"}"
+			fmt.Fprintf(w, responseStr)
+			return
 		}
 
-		for _, p := range game.players {
-			p.queuedMessage = gameStartedMessage
-		}
+		if len(game.players) == 0 {
+			responseStr := "{\"status\": \"ERROR\", \"message\": \"No players in game\"}"
+			fmt.Fprintf(w, responseStr)
+		} else if game.gameStarted == false {
+			if game.totalRounds <= 0 {
+				game.totalRounds = len(game.players)
+			}
+			game.gameStarted = true
+			game.prompts = make([][]string, len(game.players))
+			game.drawings = make([][]string, len(game.players))
+			for i := range game.prompts {
+				game.prompts[i] = make([]string, game.totalRounds)
+				game.drawings[i] = make([]string, game.totalRounds)
+			}
 
-		responseStr := "{\"status\": \"OK\", \"message\": \"Game started\"}"
-		fmt.Fprintf(w, responseStr)
+			for _, p := range game.players {
+				p.queuedMessage = gameStartedMessage
+			}
+
+			responseStr := "{\"status\": \"OK\", \"message\": \"Game started\"}"
+			fmt.Fprintf(w, responseStr)
+		} else {
+			responseStr := "{\"status\": \"ERROR\", \"message\": \"Game already started\"}"
+			fmt.Fprintf(w, responseStr)
+		}
 	} else {
-		responseStr := "{\"status\": \"ERROR\", \"message\": \"Game already started\"}"
-		fmt.Fprintf(w, responseStr)
+		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
 }
 
 func _endGame(gameName string) {
-	// TODO move the game results to a new EndedGame struct and add it to the endedGames map (slice?)
-	//   EndedGame struct is different in that it has the slice of gifs, drawing urls, and captions
-	// 	 But no players, spectators, timers, etc.
 	game := games[gameName]
 	gifs := createGifsFromGame(game)
 
@@ -375,11 +435,19 @@ func _endGame(gameName string) {
 }
 
 func endGame(w http.ResponseWriter, r *http.Request) {
-	jsonObject := parseBodyObject(r)
-	gameName := jsonObject["gameName"]
-	responseStr := "{\"status\": \"OK\", \"message\": \"Game ended\"}"
-	fmt.Fprintf(w, responseStr)
-	_endGame(gameName)
+	allowCors(&w)
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	} else if r.Method == "POST" {
+		jsonObject := parseBodyObject(r)
+		gameName := jsonObject["gameName"]
+		responseStr := "{\"status\": \"OK\", \"message\": \"Game ended\"}"
+		fmt.Fprintf(w, responseStr)
+		_endGame(gameName)
+	} else {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
 }
 
 func _endRound(gameName string) bool {
@@ -417,15 +485,23 @@ func _endRound(gameName string) bool {
 }
 
 func endRound(w http.ResponseWriter, r *http.Request) {
-	// End a round
-	jsonObject := parseBodyObject(r)
-	gameName := jsonObject["gameName"]
-	_endRound(gameName)
-	// Implement logic for either serving prompts or drawings to players
-	// This will be done using the round number as an offset to the player index
-	// First round player 1 creates prompt 1, player 2 gets prompt 1, player 3 gets prompt 2, etc.
-	responseStr := "{\"status\": \"OK\", \"message\": \"Round ended\"}"
-	fmt.Fprintf(w, responseStr)
+	allowCors(&w)
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	} else if r.Method == "POST" {
+		// End a round
+		jsonObject := parseBodyObject(r)
+		gameName := jsonObject["gameName"]
+		_endRound(gameName)
+		// Implement logic for either serving prompts or drawings to players
+		// This will be done using the round number as an offset to the player index
+		// First round player 1 creates prompt 1, player 2 gets prompt 1, player 3 gets prompt 2, etc.
+		responseStr := "{\"status\": \"OK\", \"message\": \"Round ended\"}"
+		fmt.Fprintf(w, responseStr)
+	} else {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
 }
 
 func authenticatePlayer(givenPlayerName, givenPlayerSecret string) bool {
@@ -447,49 +523,65 @@ func authenticatePlayer(givenPlayerName, givenPlayerSecret string) bool {
 }
 
 func checkAuthentication(w http.ResponseWriter, r *http.Request) {
-	// Check if a player is authenticated
-	jsonObject := parseBodyObject(r)
-	playerName := jsonObject["playerName"]
-	playerSecret := jsonObject["playerSecret"]
-	// returnString := "{"
-	returnString := "{\"status\": \"OK\", "
-	if authenticatePlayer(playerName, playerSecret) {
-		returnString += "\"authenticated\": true}"
+	allowCors(&w)
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	} else if r.Method == "POST" {
+		// Check if a player is authenticated
+		jsonObject := parseBodyObject(r)
+		playerName := jsonObject["playerName"]
+		playerSecret := jsonObject["playerSecret"]
+		// returnString := "{"
+		returnString := "{\"status\": \"OK\", "
+		if authenticatePlayer(playerName, playerSecret) {
+			returnString += "\"authenticated\": true}"
+		} else {
+			returnString += "\"authenticated\": false}"
+		}
+		fmt.Fprintf(w, returnString)
 	} else {
-		returnString += "\"authenticated\": false}"
+		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
-	fmt.Fprintf(w, returnString)
 }
 
 func joinGame(w http.ResponseWriter, r *http.Request) {
-	// Accept a POST request to join a game
-	bodyObj := parseBodyObject(r)
+	allowCors(&w)
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	} else if r.Method == "POST" {
+		// Accept a POST request to join a game
+		bodyObj := parseBodyObject(r)
 
-	gameName := bodyObj["gameName"]
-	playerName := bodyObj["playerName"]
-	playerSecret := bodyObj["playerSecret"]
+		gameName := bodyObj["gameName"]
+		playerName := bodyObj["playerName"]
+		playerSecret := bodyObj["playerSecret"]
 
-	if authenticatePlayer(playerName, playerSecret) {
-		game, ok := games[gameName]
-		if !ok {
-			fmt.Fprintf(w, "Game not found")
+		if authenticatePlayer(playerName, playerSecret) {
+			game, ok := games[gameName]
+			if !ok {
+				fmt.Fprintf(w, "Game not found")
+				return
+			}
+			player := players[playerName]
+			if game.gameStarted == false {
+				player.queuedMessage = joinedGameMessage
+				game.players = append(game.players, player)
+				responseStr := "{\"status\": \"OK\", \"message\": \"Player joined game\"}"
+				fmt.Fprintf(w, responseStr)
+			} else {
+				game.spectators = append(game.spectators, player)
+				responseStr := "{\"status\": \"OK\", \"message\": \"Player joined game as spectator\"}"
+				fmt.Fprintf(w, responseStr)
+			}
+		} else {
+			responseStr := "{\"status\": \"ERROR\", \"message\": \"Player not authenticated\"}"
+			fmt.Fprintf(w, responseStr)
 			return
 		}
-		player := players[playerName]
-		if game.gameStarted == false {
-			player.queuedMessage = joinedGameMessage
-			game.players = append(game.players, player)
-			responseStr := "{\"status\": \"OK\", \"message\": \"Player joined game\"}"
-			fmt.Fprintf(w, responseStr)
-		} else {
-			game.spectators = append(game.spectators, player)
-			responseStr := "{\"status\": \"OK\", \"message\": \"Player joined game as spectator\"}"
-			fmt.Fprintf(w, responseStr)
-		}
 	} else {
-		responseStr := "{\"status\": \"ERROR\", \"message\": \"Player not authenticated\"}"
-		fmt.Fprintf(w, responseStr)
-		return
+		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
 }
 
@@ -514,116 +606,131 @@ func progressGameIfReady(game *Game) {
 }
 
 func submitPrompt(w http.ResponseWriter, r *http.Request) {
-	// Submit a prompt to the current game
-	bodyObj := parseBodyObject(r)
+	allowCors(&w)
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	} else if r.Method == "POST" {
+		// Submit a prompt to the current game
+		bodyObj := parseBodyObject(r)
 
-	gameName := bodyObj["gameName"]
-	playerName := bodyObj["playerName"]
-	playerSecret := bodyObj["playerSecret"]
-	prompt := bodyObj["prompt"]
+		gameName := bodyObj["gameName"]
+		playerName := bodyObj["playerName"]
+		playerSecret := bodyObj["playerSecret"]
+		prompt := bodyObj["prompt"]
 
-	if authenticatePlayer(playerName, playerSecret) {
-		game, ok := games[gameName]
-		if !ok {
-			responseStr := "{\"status\": \"ERROR\", \"message\": \"Game not found\"}"
-			fmt.Fprintf(w, responseStr)
-			return
-		}
+		if authenticatePlayer(playerName, playerSecret) {
+			game, ok := games[gameName]
+			if !ok {
+				responseStr := "{\"status\": \"ERROR\", \"message\": \"Game not found\"}"
+				fmt.Fprintf(w, responseStr)
+				return
+			}
 
-		if game.gameStarted == false {
-			responseStr := "{\"status\": \"ERROR\", \"message\": \"Game not started\"}"
-			fmt.Fprintf(w, responseStr)
-			return
-		}
-		if game.promptsSet == true {
-			responseStr := "{\"status\": \"ERROR\", \"message\": \"Prompts already set for this round\"}"
-			fmt.Fprintf(w, responseStr)
-			return
-		}
-		playerIndex := getPlayerIndex(playerName, game)
-		if playerIndex == -1 {
-			responseStr := "{\"status\": \"ERROR\", \"message\": \"Player not in game\"}"
-			fmt.Fprintf(w, responseStr)
-			return
-		}
+			if game.gameStarted == false {
+				responseStr := "{\"status\": \"ERROR\", \"message\": \"Game not started\"}"
+				fmt.Fprintf(w, responseStr)
+				return
+			}
+			if game.promptsSet == true {
+				responseStr := "{\"status\": \"ERROR\", \"message\": \"Prompts already set for this round\"}"
+				fmt.Fprintf(w, responseStr)
+				return
+			}
+			playerIndex := getPlayerIndex(playerName, game)
+			if playerIndex == -1 {
+				responseStr := "{\"status\": \"ERROR\", \"message\": \"Player not in game\"}"
+				fmt.Fprintf(w, responseStr)
+				return
+			}
 
-		gameRotationIndex := (playerIndex + game.currentRound) % len(game.players)
-		if len(game.prompts) == 0 || len(game.prompts[gameRotationIndex]) == 0 {
-			responseStr := "{\"status\": \"ERROR\", \"message\": \"Game prompts slice not initialized\"}"
-			fmt.Fprintf(w, responseStr)
-			return
-		}
-		if game.prompts[gameRotationIndex][game.currentRound] == "" {
-			game.prompts[gameRotationIndex][game.currentRound] = prompt
-			responseStr := "{\"status\": \"OK\", \"message\": \"Prompt submitted\"}"
-			fmt.Fprintf(w, responseStr)
-			progressGameIfReady(game)
+			gameRotationIndex := (playerIndex + game.currentRound) % len(game.players)
+			if len(game.prompts) == 0 || len(game.prompts[gameRotationIndex]) == 0 {
+				responseStr := "{\"status\": \"ERROR\", \"message\": \"Game prompts slice not initialized\"}"
+				fmt.Fprintf(w, responseStr)
+				return
+			}
+			if game.prompts[gameRotationIndex][game.currentRound] == "" {
+				game.prompts[gameRotationIndex][game.currentRound] = prompt
+				responseStr := "{\"status\": \"OK\", \"message\": \"Prompt submitted\"}"
+				fmt.Fprintf(w, responseStr)
+				progressGameIfReady(game)
+			} else {
+				responseStr := "{\"status\": \"ERROR\", \"message\": \"Prompt already submitted\"}"
+				fmt.Fprintf(w, responseStr)
+			}
 		} else {
-			responseStr := "{\"status\": \"ERROR\", \"message\": \"Prompt already submitted\"}"
+			responseStr := "{\"status\": \"ERROR\", \"message\": \"Player not authenticated\"}"
 			fmt.Fprintf(w, responseStr)
+
+			return
 		}
 	} else {
-		responseStr := "{\"status\": \"ERROR\", \"message\": \"Player not authenticated\"}"
-		fmt.Fprintf(w, responseStr)
-
-		return
+		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
 }
 
 func submitDrawing(w http.ResponseWriter, r *http.Request) {
-	// Submit a prompt to the current game
-	bodyObj := parseBodyObject(r)
+	allowCors(&w)
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+	} else if r.Method == "POST" {
+		// Submit a prompt to the current game
+		bodyObj := parseBodyObject(r)
 
-	gameName := bodyObj["gameName"]
-	playerName := bodyObj["playerName"]
-	playerSecret := bodyObj["playerSecret"]
-	drawing := bodyObj["drawing"]
+		gameName := bodyObj["gameName"]
+		playerName := bodyObj["playerName"]
+		playerSecret := bodyObj["playerSecret"]
+		drawing := bodyObj["drawing"]
 
-	if authenticatePlayer(playerName, playerSecret) {
-		game, ok := games[gameName]
-		if !ok {
-			responseStr := "{\"status\": \"ERROR\", \"message\": \"Game not found\"}"
-			fmt.Fprintf(w, responseStr)
-			return
-		}
+		if authenticatePlayer(playerName, playerSecret) {
+			game, ok := games[gameName]
+			if !ok {
+				responseStr := "{\"status\": \"ERROR\", \"message\": \"Game not found\"}"
+				fmt.Fprintf(w, responseStr)
+				return
+			}
 
-		if game.gameStarted == false {
-			responseStr := "{\"status\": \"ERROR\", \"message\": \"Game not started\"}"
-			fmt.Fprintf(w, responseStr)
-			return
-		}
-		if game.promptsSet == false {
-			responseStr := "{\"status\": \"ERROR\", \"message\": \"Prompts not yet set for this round\"}"
-			fmt.Fprintf(w, responseStr)
-			return
-		}
-		playerIndex := getPlayerIndex(playerName, game)
-		if playerIndex == -1 {
-			responseStr := "{\"status\": \"ERROR\", \"message\": \"Player not in game\"}"
-			fmt.Fprintf(w, responseStr)
-			return
-		}
+			if game.gameStarted == false {
+				responseStr := "{\"status\": \"ERROR\", \"message\": \"Game not started\"}"
+				fmt.Fprintf(w, responseStr)
+				return
+			}
+			if game.promptsSet == false {
+				responseStr := "{\"status\": \"ERROR\", \"message\": \"Prompts not yet set for this round\"}"
+				fmt.Fprintf(w, responseStr)
+				return
+			}
+			playerIndex := getPlayerIndex(playerName, game)
+			if playerIndex == -1 {
+				responseStr := "{\"status\": \"ERROR\", \"message\": \"Player not in game\"}"
+				fmt.Fprintf(w, responseStr)
+				return
+			}
 
-		gameRotationIndex := (playerIndex + game.currentRound) % len(game.players)
-		if len(game.drawings) == 0 || len(game.drawings[gameRotationIndex]) == 0 {
-			responseStr := "{\"status\": \"ERROR\", \"message\": \"Game drawings slice not initialized\"}"
-			fmt.Fprintf(w, responseStr)
-			return
-		}
-		if game.drawings[gameRotationIndex][game.currentRound] == "" {
-			game.drawings[gameRotationIndex][game.currentRound] = drawing
-			responseStr := "{\"status\": \"OK\", \"message\": \"Drawing submitted\"}"
-			fmt.Fprintf(w, responseStr)
-			progressGameIfReady(game)
+			gameRotationIndex := (playerIndex + game.currentRound) % len(game.players)
+			if len(game.drawings) == 0 || len(game.drawings[gameRotationIndex]) == 0 {
+				responseStr := "{\"status\": \"ERROR\", \"message\": \"Game drawings slice not initialized\"}"
+				fmt.Fprintf(w, responseStr)
+				return
+			}
+			if game.drawings[gameRotationIndex][game.currentRound] == "" {
+				game.drawings[gameRotationIndex][game.currentRound] = drawing
+				responseStr := "{\"status\": \"OK\", \"message\": \"Drawing submitted\"}"
+				fmt.Fprintf(w, responseStr)
+				progressGameIfReady(game)
 
+			} else {
+				responseStr := "{\"status\": \"ERROR\", \"message\": \"Drawing already submitted\"}"
+				fmt.Fprintf(w, responseStr)
+			}
 		} else {
-			responseStr := "{\"status\": \"ERROR\", \"message\": \"Drawing already submitted\"}"
+			responseStr := "{\"status\": \"ERROR\", \"message\": \"Player not authenticated\"}"
 			fmt.Fprintf(w, responseStr)
+			return
 		}
 	} else {
-		responseStr := "{\"status\": \"ERROR\", \"message\": \"Player not authenticated\"}"
-		fmt.Fprintf(w, responseStr)
-		return
+		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
 }
 
@@ -664,81 +771,89 @@ func getBaseURL(r *http.Request) string {
 }
 
 func uploadDrawing(w http.ResponseWriter, r *http.Request) {
-	// Limit the size of the uploaded file to 10 MB
-	err := r.ParseMultipartForm(10 << 20) // We are limiting the size to 10 MB
-	if err != nil {
-		http.Error(w, "Error parsing multipart form", http.StatusBadRequest)
+	allowCors(&w)
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
 		return
-	}
-
-	// Get form values for authentication
-	playerName := r.FormValue("playerName")
-	playerSecret := r.FormValue("playerSecret")
-
-	// Authenticate the player
-	if !authenticatePlayer(playerName, playerSecret) {
-		http.Error(w, "Player not authenticated", http.StatusUnauthorized)
-		return
-	}
-
-	// Retrieve the file from the request
-	file, _, err := r.FormFile("file")
-	if err != nil {
-		http.Error(w, "Error retrieving the file", http.StatusBadRequest)
-		return
-	}
-	defer file.Close()
-
-	// Decode the image
-	img, format, err := image.Decode(file)
-	if err != nil {
-		http.Error(w, "Error decoding image", http.StatusBadRequest)
-		return
-	}
-	if format != "jpeg" && format != "png" {
-		http.Error(w, "Unsupported file type", http.StatusUnsupportedMediaType)
-		return
-	}
-
-	resizedImage := resizeImage(img, 1024, 1024)
-
-	// Generate a short hash for the filename
-	hash := generateShortHash()
-	if hash == "" {
-		http.Error(w, "Error generating file name", http.StatusInternalServerError)
-		return
-	}
-
-	// Ensure the images directory exists
-	if _, err := os.Stat("images"); os.IsNotExist(err) {
-		err = os.Mkdir("images", os.ModePerm)
+	} else if r.Method == "POST" {
+		// Limit the size of the uploaded file to 10 MB
+		err := r.ParseMultipartForm(10 << 20) // We are limiting the size to 10 MB
 		if err != nil {
-			http.Error(w, "Error creating images directory", http.StatusInternalServerError)
+			http.Error(w, "Error parsing multipart form", http.StatusBadRequest)
 			return
 		}
-	}
 
-	// Create the output file
-	outputPath := fmt.Sprintf("images/%s.png", hash)
-	outFile, err := os.Create(outputPath)
-	if err != nil {
-		http.Error(w, "Unable to create the file for writing", http.StatusInternalServerError)
-		return
-	}
-	defer outFile.Close()
+		// Get form values for authentication
+		playerName := r.FormValue("playerName")
+		playerSecret := r.FormValue("playerSecret")
 
-	// Save the image in PNG format
-	err = png.Encode(outFile, resizedImage)
-	if err != nil {
-		http.Error(w, "Error encoding image to PNG", http.StatusInternalServerError)
-		return
-	}
+		// Authenticate the player
+		if !authenticatePlayer(playerName, playerSecret) {
+			http.Error(w, "Player not authenticated", http.StatusUnauthorized)
+			return
+		}
 
-	// Return the relative URL of the saved image
-	baseUrl := getBaseURL(r)
-	imageUrl := fmt.Sprintf("%s/%s", baseUrl, outputPath)
-	responseStr := "{\"status\": \"OK\", \"message\": \"Image uploaded\", \"imageUrl\": \"" + imageUrl + "\"}"
-	fmt.Fprintf(w, responseStr)
+		// Retrieve the file from the request
+		file, _, err := r.FormFile("file")
+		if err != nil {
+			http.Error(w, "Error retrieving the file", http.StatusBadRequest)
+			return
+		}
+		defer file.Close()
+
+		// Decode the image
+		img, format, err := image.Decode(file)
+		if err != nil {
+			http.Error(w, "Error decoding image", http.StatusBadRequest)
+			return
+		}
+		if format != "jpeg" && format != "png" {
+			http.Error(w, "Unsupported file type", http.StatusUnsupportedMediaType)
+			return
+		}
+
+		resizedImage := resizeImage(img, 1024, 1024)
+
+		// Generate a short hash for the filename
+		hash := generateShortHash()
+		if hash == "" {
+			http.Error(w, "Error generating file name", http.StatusInternalServerError)
+			return
+		}
+
+		// Ensure the images directory exists
+		if _, err := os.Stat("images"); os.IsNotExist(err) {
+			err = os.Mkdir("images", os.ModePerm)
+			if err != nil {
+				http.Error(w, "Error creating images directory", http.StatusInternalServerError)
+				return
+			}
+		}
+
+		// Create the output file
+		outputPath := fmt.Sprintf("images/%s.png", hash)
+		outFile, err := os.Create(outputPath)
+		if err != nil {
+			http.Error(w, "Unable to create the file for writing", http.StatusInternalServerError)
+			return
+		}
+		defer outFile.Close()
+
+		// Save the image in PNG format
+		err = png.Encode(outFile, resizedImage)
+		if err != nil {
+			http.Error(w, "Error encoding image to PNG", http.StatusInternalServerError)
+			return
+		}
+
+		// Return the relative URL of the saved image
+		baseUrl := getBaseURL(r)
+		imageUrl := fmt.Sprintf("%s/%s", baseUrl, outputPath)
+		responseStr := "{\"status\": \"OK\", \"message\": \"Image uploaded\", \"imageUrl\": \"" + imageUrl + "\"}"
+		fmt.Fprintf(w, responseStr)
+	} else {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
 }
 
 func parseImagePathFromUrl(inputUrl string) string {
