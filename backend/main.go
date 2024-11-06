@@ -311,6 +311,9 @@ func gameStateToJSON(game Game) string {
 			}
 		}
 		gameJsonString += "]"
+		if i < len(game.prompts)-1 {
+			gameJsonString += ","
+		}
 	}
 	gameJsonString += "],"
 	gameJsonString += "\"drawings\": ["
@@ -323,6 +326,9 @@ func gameStateToJSON(game Game) string {
 			}
 		}
 		gameJsonString += "]"
+		if i < len(game.drawings)-1 {
+			gameJsonString += ","
+		}
 	}
 	gameJsonString += "]"
 	gameJsonString += "}"
@@ -462,7 +468,7 @@ func _endRound(gameName string) bool {
 		// } else {
 		// set queued messages for players to draw
 		for i, p := range game.players {
-			p.queuedMessage = drawPromptMessage + "\"prompt\": \"" + game.prompts[i][game.currentRound] + "\"}"
+			p.queuedMessage = drawPromptMessage + ",\"prompt\": \"" + game.prompts[i][game.currentRound] + "\"}"
 		}
 
 		game.promptsSet = true
@@ -471,7 +477,7 @@ func _endRound(gameName string) bool {
 	} else {
 		// set queued messages for players to caption the drawings
 		for i, p := range game.players {
-			p.queuedMessage = captionPromptMessage + "\"image\": \"" + game.drawings[i][game.currentRound] + "\"}"
+			p.queuedMessage = captionPromptMessage + ",\"image\": \"" + game.drawings[i][game.currentRound] + "\"}"
 		}
 
 		game.currentRound++
