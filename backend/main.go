@@ -10,6 +10,7 @@ import (
 	"image/color/palette"
 	"image/gif"
 	"image/png"
+	mrand "math/rand"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -231,36 +232,38 @@ func endedGameStateToJSON(endedGame EndedGame) string {
 	gameJsonString += "\"gameName\": \"" + endedGame.gameName + "\","
 	gameJsonString += "\"gameId\": \"" + endedGame.gameId + "\","
 	gameJsonString += "\"prompts\": ["
-	for _, prompt := range endedGame.prompts {
+	for i, prompt := range endedGame.prompts {
 		gameJsonString += "["
-		for _, word := range prompt {
-			gameJsonString += "\"" + word + "\","
+		for j := range prompt {
+			gameJsonString += "\"" + endedGame.prompts[i][j] + "\""
+			if j < len(prompt)-1 {
+				gameJsonString += ","
+			}
 		}
-		gameJsonString = gameJsonString[:len(gameJsonString)-1]
-		gameJsonString += "],"
-	}
-	if len(endedGame.prompts) > 0 {
-		gameJsonString = gameJsonString[:len(gameJsonString)-1]
+		gameJsonString += "]"
+		if i < len(endedGame.prompts)-1 {
+			gameJsonString += ","
+		}
 	}
 	gameJsonString += "],"
 	gameJsonString += "\"drawings\": ["
-	for _, drawing := range endedGame.drawings {
+	for i, drawing := range endedGame.drawings {
 		gameJsonString += "["
-		for _, word := range drawing {
-			gameJsonString += "\"" + word + "\","
+		for j := range drawing {
+			gameJsonString += "\"" + endedGame.drawings[i][j] + "\""
+			if j < len(drawing)-1 {
+				gameJsonString += ","
+			}
 		}
-		gameJsonString = gameJsonString[:len(gameJsonString)-1]
-		gameJsonString += "],"
-	}
-	if len(endedGame.drawings) > 0 {
-		gameJsonString = gameJsonString[:len(gameJsonString)-1]
+		gameJsonString += "]"
+		if i < len(endedGame.drawings)-1 {
+			gameJsonString += ","
+		}
 	}
 	gameJsonString += "],"
 	gameJsonString += "\"gifs\": ["
 	for _, gif := range endedGame.gifs {
-		gameJsonString += "["
 		gameJsonString += "\"" + gif + "\","
-		gameJsonString += "],"
 	}
 	if len(endedGame.gifs) > 0 {
 		gameJsonString = gameJsonString[:len(gameJsonString)-1]
@@ -406,6 +409,12 @@ func startGame(w http.ResponseWriter, r *http.Request) {
 				game.drawings[i] = make([]string, game.totalRounds)
 			}
 
+			// shuffle the order of the players
+			for i := range game.players {
+				j := mrand.Intn(i + 1)
+				game.players[i], game.players[j] = game.players[j], game.players[i]
+			}
+
 			for _, p := range game.players {
 				p.queuedMessage = gameStartedMessage
 			}
@@ -463,10 +472,6 @@ func _endRound(gameName string) bool {
 	}
 
 	if game.promptsSet == false {
-		// if game.currentRound == game.totalRounds-1 {
-		// 	_endGame(gameName)
-		// } else {
-		// set queued messages for players to draw
 		for i, p := range game.players {
 			p.queuedMessage = drawPromptMessage + ",\"prompt\": \"" + game.prompts[i][game.currentRound] + "\"}"
 		}
@@ -477,7 +482,8 @@ func _endRound(gameName string) bool {
 	} else {
 		// set queued messages for players to caption the drawings
 		for i, p := range game.players {
-			p.queuedMessage = captionPromptMessage + ",\"image\": \"" + game.drawings[i][game.currentRound] + "\"}"
+			offsetIndex := (1 + i + game.currentRound) % len(game.players)
+			p.queuedMessage = captionPromptMessage + ",\"image\": \"" + game.drawings[offsetIndex][game.currentRound] + "\"}"
 		}
 
 		game.currentRound++
@@ -1209,7 +1215,7 @@ func createGifsFromGame(game *Game) []string {
 			fmt.Println("Error creating GIF from prompt chain")
 			continue
 		}
-
+		gifFilePath = baseUrl + "/" + gifFilePath
 		gifFilePaths = append(gifFilePaths, gifFilePath)
 	}
 
@@ -1244,6 +1250,7 @@ func createGifsFromGame(game *Game) []string {
 func main() {
 	http.HandleFunc("/createGame", createGame)
 	http.HandleFunc("/listGames", listGames)
+	http.HandleFunc("/listEndedGames", listEndedGames)
 	http.HandleFunc("/getGameState", getGameState)
 	http.HandleFunc("/getEndedGame", getEndedGame)
 	http.HandleFunc("/startGame", startGame)
@@ -1259,7 +1266,7 @@ func main() {
 	is := http.FileServer(http.Dir("images"))
 	http.Handle("/images/", http.StripPrefix("/images/", is))
 	// example: http://localhost:9119/images/12345678.png
-	gs := http.FileServer(http.Dir("images"))
+	gs := http.FileServer(http.Dir("gifs"))
 	http.Handle("/gifs/", http.StripPrefix("/gifs/", gs))
 	http.ListenAndServe(":9119", nil)
 }
