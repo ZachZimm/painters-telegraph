@@ -45,15 +45,6 @@ export function PlayerMessageDisplay({
       });
   };
 
-  const setPlayerNameFunc = () => {
-    if (document.getElementById("nameInput").value === "") {
-      return false;
-    }
-    setPlayerName(document.getElementById("nameInput").value) || "defaultName";
-    onUserUpdate();
-    setShouldUpdate(!shouldUpdate);
-  };
-
   const fetchGamesList = () => {
     const url = "http://lab-ts:9119/listGames";
     // GET request
@@ -67,6 +58,8 @@ export function PlayerMessageDisplay({
   const createGame = () => {
     const url = "http://lab-ts:9119/createGame";
     var requestBody = {
+      playerName: userName,
+      playerSecret: userId,
       gameName: document.getElementById("gameInput").value || "defaultGameName",
       totalRounds: "2",
     };
@@ -87,6 +80,8 @@ export function PlayerMessageDisplay({
   const startGame = () => {
     const url = "http://lab-ts:9119/startGame";
     var requestBody = {
+      playerName: userName,
+      playerSecret: userId,
       gameName: document.getElementById("gameInput").value || "defaultGameName",
     };
     fetch(url, {
@@ -106,6 +101,8 @@ export function PlayerMessageDisplay({
   const endGame = () => {
     const url = "http://lab-ts:9119/endGame";
     var requestBody = {
+      playerName: userName,
+      playerSecret: userId,
       gameName: document.getElementById("gameInput").value || "defaultGameName",
     };
     fetch(url, {
@@ -125,6 +122,8 @@ export function PlayerMessageDisplay({
   const endRound = () => {
     const url = "http://lab-ts:9119/endRound";
     var requestBody = {
+      playerName: userName,
+      playerSecret: userId,
       gameName: document.getElementById("gameInput").value || "defaultGameName",
     };
     fetch(url, {
@@ -172,12 +171,12 @@ export function PlayerMessageDisplay({
     <div className="flex flex-col h-full justify-items-center p-3 bg-accent items-center">
       <ScrollArea className="flex-1">
         <Card className="max-w-[auto] p-2 rounded-lg">
-          <h2 className="font-semibold justify-self-start pb-2 text-primary-foreground">
+          <h2 className="font-semibold justify-self-start pb-2 text-secondary-foreground">
             List of games:
           </h2>
           {gamesList.map((game, index) => (
             <div key={index} className="p-2 m-2 border rounded bg-secondary">
-              <h3 className="font-bold text-primary-foreground">{game}</h3>{" "}
+              <h3 className="font-bold text-secondary-foreground">{game}</h3>{" "}
             </div>
           ))}
         </Card>

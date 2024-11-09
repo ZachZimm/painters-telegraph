@@ -3,6 +3,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Card } from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
+// import refresh icon
+import { RefreshCw } from "lucide-react";
 
 interface PlayerInteractionDisplayProps {
   userId: string;
@@ -76,7 +79,8 @@ export function PlayerInteractionDisplay({
   const fetchEndedGameData = () => {
     const url = "http://lab-ts:9119/getEndedGame";
     var requestBody = {
-      gameId: gameId,
+      gameId: "c5711edd5aac63d93761ca8755ba8ea5",
+      // gameId: gameId,
     };
     fetch(url, {
       method: "POST",
@@ -198,12 +202,17 @@ export function PlayerInteractionDisplay({
   };
   return (
     <div className="flex flex-col h-full items-center p-3 bg-accent">
+      <RefreshCw
+        className="w-6 h-6 text-accent-foreground cursor-pointer ml-auto mr-2"
+        onClick={() => setShouldUpdate(!shouldUpdate)}
+      />
       <ScrollArea className="flex-1">
         <div className="flex flex-col items-center">
           <div>
             <h2 className="font-semibold pb-2 text-accent-foreground">
               {playerMessageObject.message}
-              {parseInt(gameState.totalRounds) !== 0 &&
+              {parseInt(gameState.totalRounds || 0) !== 0 &&
+                gameState.gameStarted == true &&
                 (
                   " - Round " +
                   (parseInt(gameState.currentRound || 0) + 1)
@@ -227,7 +236,7 @@ export function PlayerInteractionDisplay({
             </div>
           )}
           {playerMessageObject.image && (
-            <Card className="max-w-[45%] p-6 rounded-lg mx-auto">
+            <Card className="max-w-[65%] p-6 rounded-lg mx-auto">
               <img
                 src={playerMessageObject.image}
                 alt="prompt image"
@@ -250,27 +259,36 @@ export function PlayerInteractionDisplay({
             </div>
           )}
           {gameId !== "" && (
-            <div className="flex flex-col mt-4 max-w-[45%]">
+            <div className="flex flex-col mt-4 max-w-[50%]">
               <Button variant="default" onMouseUp={fetchEndedGameData}>
                 Fetch Ended Game Data
               </Button>
-              <h2 className="font-semibold flex-wrap pb-2 text-accent-foreground">
+              {/* <h2 className="font-semibold flex-wrap pb-2 text-accent-foreground">
                 {JSON.stringify(gameState)}
                 <br />
                 {gameState.gameStarted}
                 <br />
                 Game ID: {gameId}
-              </h2>
+              </h2> */}
             </div>
           )}
           {gameState.gifs && (
-            <div className="mt-4">
-              <h2 className="font-semibold pb-2 text-accent-foreground">
+            <div className="flex flex-col gap-1 mt-4 p-6 mx-auto">
+              {/* <h2 className="font-semibold pb-2 text-accent-foreground">
                 Gifs:
-              </h2>
-              <div className="flex flex-wrap gap-2">
+              </h2> */}
+              <Label
+                className="text-accent-foreground font-semibold mr-[33%]"
+                htmlFor="gifsDiv"
+              >
+                Gifs:
+              </Label>
+              <div id="gifsDiv" className="flex flex-col gap-2">
                 {gameState.gifs.map((gif: string, index: number) => (
-                  <Card key={index} className="max-w-[40%]">
+                  <Card
+                    key={index}
+                    className="max-w-[65%] p-6 rounded-lg mx-auto"
+                  >
                     <img src={gif} alt="gif" className="max-w-full h-auto" />
                   </Card>
                 ))}

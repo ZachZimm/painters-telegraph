@@ -1,4 +1,5 @@
 backend/pt-backend
 backend/images/
 backend/gifs/
+frontend/node_modules/
 *._*

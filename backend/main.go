@@ -55,6 +55,7 @@ type Game struct {
 	roundTimer   int
 	totalRounds  int
 	currentRound int
+	creator      string
 	promptsSet   bool
 	gameStarted  bool
 	players      []*Player
@@ -64,11 +65,12 @@ type Game struct {
 }
 
 type EndedGame struct {
-	gameName string
-	gameId   string
-	prompts  [][]string
-	drawings [][]string
-	gifs     []string
+	gameName        string
+	gameId          string
+	roundsCompleted int
+	prompts         [][]string
+	drawings        [][]string
+	gifs            []string
 }
 
 func getPlayerIndex(playerName string, game *Game) int {
@@ -118,6 +120,7 @@ func getPlayerQueuedMessage(w http.ResponseWriter, r *http.Request) {
 // An endpoint to create a new game
 func createGame(w http.ResponseWriter, r *http.Request) {
 	allowCors(&w)
+
 	if r.Method == "OPTIONS" {
 		w.WriteHeader(http.StatusOK)
 		return
@@ -128,6 +131,14 @@ func createGame(w http.ResponseWriter, r *http.Request) {
 
 		// Create a new game
 		jsonObject := parseBodyObject(r)
+		playerName := jsonObject["playerName"]
+		playerSecret := jsonObject["playerSecret"]
+		if !authenticatePlayer(playerName, playerSecret) {
+			responseStr := "{\"status\": \"ERROR\", \"message\": \"Player not authenticated\"}"
+			fmt.Fprintf(w, responseStr)
+			return
+		}
+
 		// parse the JSON object for the fields, and use default values if they are not provided
 		_gameName := jsonObject["gameName"]
 		if _gameName == "" {
@@ -167,6 +178,7 @@ func createGame(w http.ResponseWriter, r *http.Request) {
 			gameId:       _gameId,
 			roundTimer:   _roundTimer,
 			totalRounds:  _totalRounds,
+			creator:      playerName,
 			currentRound: 0,
 			promptsSet:   false,
 			players:      []*Player{},
@@ -394,6 +406,18 @@ func startGame(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		if !authenticatePlayer(jsonObject["playerName"], jsonObject["playerSecret"]) {
+			responseStr := "{\"status\": \"ERROR\", \"message\": \"Invalid player secret\"}"
+			fmt.Fprintf(w, responseStr)
+			return
+		}
+
+		if !authenticateCreator(gameName, jsonObject["playerName"]) {
+			responseStr := "{\"status\": \"ERROR\", \"message\": \"Player is not the creator of the game\"}"
+			fmt.Fprintf(w, responseStr)
+			return
+		}
+
 		if len(game.players) == 0 {
 			responseStr := "{\"status\": \"ERROR\", \"message\": \"No players in game\"}"
 			fmt.Fprintf(w, responseStr)
@@ -435,11 +459,12 @@ func _endGame(gameName string) {
 	gifs := createGifsFromGame(game)
 
 	endedGame := EndedGame{
-		gameName: game.gameName,
-		gameId:   game.gameId,
-		prompts:  game.prompts,
-		drawings: game.drawings,
-		gifs:     gifs,
+		gameName:        game.gameName,
+		gameId:          game.gameId,
+		roundsCompleted: game.currentRound,
+		prompts:         game.prompts,
+		drawings:        game.drawings,
+		gifs:            gifs,
 	}
 	endedGames[game.gameId] = &endedGame
 
@@ -459,6 +484,20 @@ func endGame(w http.ResponseWriter, r *http.Request) {
 		gameName := jsonObject["gameName"]
 		responseStr := "{\"status\": \"OK\", \"message\": \"Game ended\"}"
 		fmt.Fprintf(w, responseStr)
+		playerName := jsonObject["playerName"]
+		playerSecret := jsonObject["playerSecret"]
+
+		if !authenticatePlayer(playerName, playerSecret) {
+			responseStr := "{\"status\": \"ERROR\", \"message\": \"Invalid player credentials\"}"
+			fmt.Fprintf(w, responseStr)
+			return
+		}
+		if !authenticateCreator(gameName, playerName) {
+			responseStr := "{\"status\": \"ERROR\", \"message\": \"Player is not the creator of the game\"}"
+			fmt.Fprintf(w, responseStr)
+			return
+		}
+
 		_endGame(gameName)
 	} else {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -505,10 +544,17 @@ func endRound(w http.ResponseWriter, r *http.Request) {
 		// End a round
 		jsonObject := parseBodyObject(r)
 		gameName := jsonObject["gameName"]
+		if !authenticatePlayer(jsonObject["playerName"], jsonObject["playerSecret"]) {
+			responseStr := "{\"status\": \"ERROR\", \"message\": \"Invalid player credentials\"}"
+			fmt.Fprintf(w, responseStr)
+			return
+		}
+		if !authenticateCreator(gameName, jsonObject["playerName"]) {
+			responseStr := "{\"status\": \"ERROR\", \"message\": \"Player is not the creator of the game\"}"
+			fmt.Fprintf(w, responseStr)
+			return
+		}
 		_endRound(gameName)
-		// Implement logic for either serving prompts or drawings to players
-		// This will be done using the round number as an offset to the player index
-		// First round player 1 creates prompt 1, player 2 gets prompt 1, player 3 gets prompt 2, etc.
 		responseStr := "{\"status\": \"OK\", \"message\": \"Round ended\"}"
 		fmt.Fprintf(w, responseStr)
 	} else {
@@ -532,6 +578,14 @@ func authenticatePlayer(givenPlayerName, givenPlayerSecret string) bool {
 		players[givenPlayerName] = &Player{playerName: givenPlayerName, playerSecret: givenPlayerSecret, queuedMessage: newPlayerMessage}
 		return true
 	}
+}
+
+func authenticateCreator(gameName, givenCreatorName string) bool {
+	game := games[gameName]
+	if game.creator == givenCreatorName {
+		return true
+	}
+	return false
 }
 
 func checkAuthentication(w http.ResponseWriter, r *http.Request) {
