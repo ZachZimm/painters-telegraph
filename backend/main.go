@@ -29,7 +29,7 @@ var players map[string]*Player = make(map[string]*Player)
 var (
 	newPlayerMessage               = "{\"status\": \"OK\", \"message\":\"You have not yet joined a game\"}"
 	joinedGameMessage              = "{\"status\": \"OK\", \"message\":\"You have joined the game\"}"
-	gameStartedMessage             = "{\"status\": \"OK\", \"message\":\"Write an interesting prompt!\"}"
+	gameStartedMessage             = "{\"status\": \"OK\", \"message\":\"Write an interesting prompt!\",\"startPrompt\":\"Write an interesting prompt!\"}"
 	drawPromptMessage              = "{\"status\": \"OK\", \"message\":\"Draw the prompt!\""
 	captionPromptMessage           = "{\"status\": \"OK\", \"message\":\"Write a caption for the drawing!\""
 	gameEndedMessage               = "{\"status\": \"OK\", \"message\":\"The game has ended, check the results!\""
