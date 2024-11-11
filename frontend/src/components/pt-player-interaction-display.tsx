@@ -274,22 +274,25 @@ export function PlayerInteractionDisplay({
           )}
           {gameState.gifs && (
             <div className="flex flex-col gap-1 mt-4 p-6 mx-auto">
-              {/* <h2 className="font-semibold pb-2 text-accent-foreground">
-                Gifs:
-              </h2> */}
-              <Label
-                className="text-accent-foreground font-semibold mr-[33%]"
-                htmlFor="gifsDiv"
-              >
-                Gifs:
-              </Label>
               <div id="gifsDiv" className="flex flex-col gap-2">
                 {gameState.gifs.map((gif: string, index: number) => (
                   <Card
                     key={index}
                     className="max-w-[65%] p-6 rounded-lg mx-auto"
                   >
-                    <img src={gif} alt="gif" className="max-w-full h-auto" />
+                    <Label
+                      key={index}
+                      className="text-secondary-foreground font-semibold"
+                      htmlFor={"gif" + index}
+                    >
+                      Gif {index + 1}
+                    </Label>
+                    <img
+                      id={"gif" + index}
+                      src={gif}
+                      alt="gif"
+                      className="max-w-full h-auto"
+                    />
                   </Card>
                 ))}
               </div>

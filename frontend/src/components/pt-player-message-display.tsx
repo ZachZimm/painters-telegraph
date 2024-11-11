@@ -21,6 +21,7 @@ export function PlayerMessageDisplay({
 }: PlayerMessageDisplayProps) {
   const [playerMessageObject, setPlayerMessageObject] = useState({});
   const [gamesList, setGamesList] = useState([]);
+  const [endedGamesList, setEndedGamesList] = useState([]);
   const [shouldUpdate, setShouldUpdate] = useState(false);
   const [playerName, setPlayerName] = useState(userName);
 
@@ -52,6 +53,16 @@ export function PlayerMessageDisplay({
       .then((response) => response.json())
       .then((data) => {
         setGamesList(data.games);
+      });
+  };
+
+  const fetchEndedGamesList = () => {
+    const url = "http://lab-ts:9119/listEndedGames";
+    // GET request
+    fetch(url)
+      .then((response) => response.json())
+      .then((data) => {
+        setEndedGamesList(data.games);
       });
   };
 
@@ -164,6 +175,7 @@ export function PlayerMessageDisplay({
     setPlayerName(userName);
     fetchPlayerMessage();
     fetchGamesList();
+    fetchEndedGamesList();
     onUserUpdate();
   }, [shouldUpdate, userName, playerName]);
 
@@ -175,6 +187,16 @@ export function PlayerMessageDisplay({
             List of games:
           </h2>
           {gamesList.map((game, index) => (
+            <div key={index} className="p-2 m-2 border rounded bg-secondary">
+              <h3 className="font-bold text-secondary-foreground">{game}</h3>{" "}
+            </div>
+          ))}
+        </Card>
+        <Card className="max-w-[auto] p-2 rounded-lg">
+          <h2 className="font-semibold justify-self-start pb-2 text-secondary-foreground">
+            List of ended games:
+          </h2>
+          {endedGamesList.map((game, index) => (
             <div key={index} className="p-2 m-2 border rounded bg-secondary">
               <h3 className="font-bold text-secondary-foreground">{game}</h3>{" "}
             </div>

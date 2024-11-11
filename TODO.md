@@ -3,9 +3,12 @@
   - potetnially add a secondary timer for prompts
 - Response messages should include game state codes, rather than just the inclusion or exclusion of fields
 
+- Change all of the endpoints to begin with /pt/
+
 ## Frontend
 - Add a dropdown containing options for creating a game
   - recall -1 rounds sets rounds equal to the number of players
+- Add a card which shows the names of players in the game
 - Add a drawing canvas
 - Add a slow-reveal of the prompt-drawing chains
   - this may require some changes to the backend as well
